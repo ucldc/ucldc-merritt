@@ -79,6 +79,20 @@ class MerrittAtom():
 
         return doc
 
+    def _add_paging_info(self, doc):
+        ''' add rel links for paging '''
+        # this is just dumb for now
+        self_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="self", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        first_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="first", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        prev_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="previous", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        next_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="next", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        last_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="last", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+
+    def _add_merritt_id(self, doc, merritt_collection_id):
+        ''' add Merritt ID '''
+        merritt_id = etree.SubElement(doc, etree.QName(ATOM_NS, "merritt_collection_id"))
+        merritt_id.text = merritt_collection_id 
+
     def _populate_entry(self, entry, metadata, nxid):
         ''' get <entry> element for a given set of object metadata '''
 
@@ -200,12 +214,15 @@ def main(argv=None):
     documents = ma.nx.children(nx_path) # assuming simple objects only
     nxids = [document['uid'] for document in documents]
 
+    # FIXME move this logic into MerrittAtom class
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
 
     # add header info
     ma._add_atom_elements(root)
     ma._add_collection_alt_link(root, ma.path)
+    ma._add_paging_info(root)
+    ma._add_merritt_id(root, "ark:/13030/m5rn35s8") # FIXME
 
     # add entries
     for nxid in nxids:
