@@ -8,6 +8,7 @@ from pynux import utils
 from datetime import datetime
 import dateutil.tz
 import pprint
+import urlparse
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 pp = pprint.PrettyPrinter()
@@ -168,27 +169,23 @@ class MerrittAtom():
 
     def get_object_view_url(self, nuxeo_id):
         """ Get object view URL """
-        url = "https://nuxeo-stg.cdlib.org/Nuxeo/nxdoc/default/{0}/view_documents".format(nuxeo_id)
-        
-        return url
-
-    def get_structural_metadata(self, nuxeo_id):
-        """ Get media.json file. See https://github.com/ucldc/ucldc-docs/wiki/media.json """
-        url = "http://s3url.aws.com/{0}-media.json".format(nuxeo_id) # FIXME
-        
+        parts = urlparse.urlsplit(self.nx.conf["api"])
+        url = "{}://{}/Nuxeo/nxdoc/default/{}/view_documents".format(parts.scheme, parts.netloc, nuxeo_id) 
         return url
 
     def get_full_metadata(self, nuxeo_id):
         """ Get full metadata via Nuxeo API """
-        url = "https://nuxeo-stg.cdlib.org/Nuxeo/restAPI/default/{0}/export?format=XML".format(nuxeo_id)
+        parts = urlparse.urlsplit(self.nx.conf["api"])
+        url = "{}://{}/Nuxeo/restAPI/default/{}/export?format=XML".format(parts.scheme, parts.netloc, nuxeo_id)
     
         return url
 
     def get_object_download_url(self, nuxeo_id, nuxeo_path):
-        """ Get object file download URL """
+        """ Get object file download URL. We should really put this logic in pynux """
+        parts = urlparse.urlsplit(self.nx.conf["api"])
         filename = nuxeo_path.split('/')[-1]
-        url = "https://nuxeo-stg.cdlib.org/Nuxeo/nxbigfile/default/{0}/file:content/{1}".format(nuxeo_id, filename)
-    
+        url = '{}://{}/Nuxeo/nxbigfile/default/{}/file:content/{}'.format(parts.scheme, parts.netloc, nuxeo_id, filename)
+
         return url
 
     def get_media_json_url(self, nuxeo_id):
@@ -207,7 +204,7 @@ def main(argv=None):
     nx_path = argv.path
 
     if argv.pynuxrc:
-        ma = MerrittAtom(nx_path, pynuxrc)
+        ma = MerrittAtom(nx_path, argv.pynuxrc)
     else:
         ma = MerrittAtom(nx_path)
 
