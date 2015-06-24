@@ -53,21 +53,28 @@ class MerrittAtom():
 
     def _add_atom_elements(self, doc):
         ''' add atom feed elements to document '''
-        # required ATOM feed elements
-        feed_id = etree.SubElement(doc, etree.QName(ATOM_NS, "id"))
-        feed_id.text = "http://nuxeo.cdlib.org" 
-
-        feed_title = etree.SubElement(doc, etree.QName(ATOM_NS, "title"))
-        feed_title.text = "UCLDC Metadata Feed" # FIXME get campus name from registry API?
-
-        feed_updated = etree.SubElement(doc, etree.QName(ATOM_NS, "updated"))
-        feed_updated.text = datetime.now(dateutil.tz.tzutc()).isoformat()
 
         # recommended ATOM feed elements
-        feed_author = etree.SubElement(doc, etree.QName(ATOM_NS, "author"))
+        feed_author = etree.Element(etree.QName(ATOM_NS, "author"))
         feed_author.text = "UC Libraries Digital Collection"
+        doc.insert(0, feed_author)
+
+        # required ATOM feed elements
+        feed_title = etree.Element(etree.QName(ATOM_NS, "title"))
+        feed_title.text = "UCLDC Metadata Feed" # FIXME get campus name from registry API?
+        doc.insert(0, feed_title)
+
+        feed_id = etree.Element(etree.QName(ATOM_NS, "id"))
+        feed_id.text = "http://nuxeo.cdlib.org"
+        doc.insert(0, feed_id)
 
         return doc 
+
+    def _add_feed_updated(self, doc, updated):
+        ''' add feed updated '''
+        feed_updated = etree.Element(etree.QName(ATOM_NS, "updated"))
+        feed_updated.text = updated 
+        doc.insert(0, feed_updated)
 
     def _add_collection_alt_link(self, doc, path):
         ''' add elements related to Nuxeo collection info to document '''
@@ -76,23 +83,28 @@ class MerrittAtom():
         collection_uid = collection_metadata['uid']
         collection_uri = self.get_object_view_url(collection_uid)
 
-        feed_link_alt = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="alternate", href=collection_uri, title=collection_title) 
+        feed_link_alt = etree.Element(etree.QName(ATOM_NS, "link"), rel="alternate", href=collection_uri, title=collection_title) 
+        doc.insert(0, feed_link_alt)
 
         return doc
 
     def _add_paging_info(self, doc):
         ''' add rel links for paging '''
         # this is just dumb for now
-        self_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="self", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
-        first_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="first", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
-        prev_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="previous", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
-        next_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="next", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
-        last_link = etree.SubElement(doc, etree.QName(ATOM_NS, "link"), rel="last", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        last_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="last", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        doc.insert(0, last_link)
+
+        first_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="first", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        doc.insert(0, first_link)
+
+        self_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="self", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        doc.insert(0, self_link)
 
     def _add_merritt_id(self, doc, merritt_collection_id):
         ''' add Merritt ID '''
-        merritt_id = etree.SubElement(doc, etree.QName(ATOM_NS, "merritt_collection_id"))
+        merritt_id = etree.Element(etree.QName(ATOM_NS, "merritt_collection_id"))
         merritt_id.text = merritt_collection_id 
+        doc.insert(0, merritt_id)
 
     def _populate_entry(self, entry, metadata, nxid):
         ''' get <entry> element for a given set of object metadata '''
@@ -109,6 +121,7 @@ class MerrittAtom():
         # atom updated
         atom_updated = etree.SubElement(entry, etree.QName(ATOM_NS, "updated"))
         atom_updated.text = datetime.now(dateutil.tz.tzutc()).isoformat()
+        self.last_update = atom_updated.text
 
         # atom author
         atom_author = etree.SubElement(entry, etree.QName(ATOM_NS, "author"))
@@ -215,17 +228,19 @@ def main(argv=None):
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
 
-    # add header info
-    ma._add_atom_elements(root)
-    ma._add_collection_alt_link(root, ma.path)
-    ma._add_paging_info(root)
-    ma._add_merritt_id(root, "ark:/13030/m5rn35s8") # FIXME
-
     # add entries
     for nxid in nxids:
         nx_metadata = ma._extract_nx_metadata(nxid)
-        entry = etree.SubElement(root, etree.QName(ATOM_NS, "entry"))
+        entry = etree.Element(etree.QName(ATOM_NS, "entry"))
         entry = ma._populate_entry(entry, nx_metadata, nxid)        
+        root.insert(0, entry)
+
+    # add header info
+    ma._add_merritt_id(root, "ark:/13030/m5rn35s8") # FIXME
+    ma._add_paging_info(root)
+    ma._add_collection_alt_link(root, ma.path)
+    ma._add_atom_elements(root)
+    ma._add_feed_updated(root, ma.last_update)
 
     ma._publish_feed(root)
 
