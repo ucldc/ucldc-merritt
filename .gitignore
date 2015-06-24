@@ -1,0 +1,6 @@
+*.pyc
+*.egg-info/
+dist/
+*.swp
+*.log
+nx_mrt_sample.atom
