@@ -14,13 +14,38 @@ from os.path import expanduser
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 pp = pprint.PrettyPrinter()
-PER_PAGE = 50
 ATOM_NS = "http://www.w3.org/2005/Atom"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 NX_NS = "http://www.nuxeo.org/ecm/project/schemas/tingle-california-digita/ucldc_schema"
 NS_MAP = {None: ATOM_NS,
           "nx": NX_NS,
           "dc": DC_NS}
+# we want to implement this mapping in the Registry:
+MERRITT_ID_MAP = {'asset-library/UCM': 'ark:/13030/m5b58sn8',
+                  'asset-library/UCSF/School_of_Dentistry_130': 'ark:/13030/m5xp9hp7',
+                  'asset-library/UCSF/A_History_of_UCSF': 'ark:/13030/m5sx8rx2',
+                  'asset-library/UCSF/30th_General_Hospital': 'ark:/13030/m5p58150',
+                  'asset-library/UCSF/Day_Robert_L_Collection': 'ark:/13030/m5dn6hr0',
+                  'asset-library/UCSF/Photograph_collection': 'ark:/13030/m5jd78gq',
+                  'asset-library/UCSF/JapaneseWoodblocks': 'ark:/13030/m58w5s1p',
+                  'asset-library/UCB/UCB\ EDA': 'ark:/13030/m500292r',
+                  'asset-library/UCR': 'ark:/13030/m5qg11t8',
+                  'asset-library/UCSC': 'ark:/13030/m5kq0912'}
+
+'''
+# following is mapping from Adrian. All are in Nuxeo except for UCSF Library Legacy Tobacco Documents Library
+ark:/13030/m5b58sn8    University of California, Merced Library Nuxeo collections
+ark:/13030/m52c19rr      UCSF Library Legacy Tobacco Documents Library
+ark:/13030/m5xp9hp7   UCSF Library School of Dentistry 130th Anniversary
+ark:/13030/m5sx8rx2     UCSF Library A History of UCSF
+ark:/13030/m5p58150    UCSF Library 30th General Hospital
+ark:/13030/m5dn6hr0    UCSF Library Robert L. Day Image Collection
+ark:/13030/m5jd78gq     UCSF Library Photograph Collection
+ark:/13030/m58w5s1p   UCSF Library Japanese Woodblock Print Collection
+ark:/13030/m500292r     UC Berkeley Environmental Design Archives Nuxeo collections
+ark:/13030/m5qg11t8     UC Riverside Nuxeo collections
+ark:/13030/m5kq0912    UC Santa Cruz Nuxeo collections
+'''
 
 class MerrittAtom():
 
@@ -30,6 +55,8 @@ class MerrittAtom():
             self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r')) 
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
             self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
+        self.merritt_id = 'ark:/13030/m5b58sn8' # FIXME need to map this from the path
+        self.atom_file = 'nx_mrt_sample.atom'
 
     def _extract_nx_metadata(self, uid): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
@@ -178,11 +205,12 @@ class MerrittAtom():
         xml_declaration_string = etree.tostring(xml_declaration, encoding=unicode)
         feed_string = etree.tostring(feed, pretty_print=True, encoding=unicode)
 
-        with open("nx_mrt_sample.atom", "w") as f:
+        with open(self.atom_file, "w") as f:
             f.write(xml_declaration_string)
             f.write('\n')
             f.write(feed_string)
       
+        print "Feed written to file: {}".format(self.atom_file)
         # TODO host feed
 
     def get_object_view_url(self, nuxeo_id):
@@ -194,7 +222,7 @@ class MerrittAtom():
     def get_full_metadata(self, nuxeo_id):
         """ Get full metadata via Nuxeo API """
         parts = urlparse.urlsplit(self.nx.conf["api"])
-        url = "{}://{}/Nuxeo/restAPI/default/{}/export?format=XML".format(parts.scheme, parts.netloc, nuxeo_id)
+        url = '{}://{}/Merritt/{}.xml'.format(parts.scheme, parts.netloc, nuxeo_id)
     
         return url
 
@@ -227,23 +255,25 @@ def main(argv=None):
         ma = MerrittAtom(nx_path)
 
     dh = DeepHarvestNuxeo(argv.path, '', pynuxrc=argv.pynuxrc)
+    print "Fetching Nuxeo docs. This could take a while if collection is large..."
     documents = dh.fetch_objects()
+    # TODO: fetch components also
 
-    # FIXME move this logic into MerrittAtom class
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
 
     # add entries
     for document in documents:
         nxid = document['uid']
+        print "constructing entry for {} {}".format(nxid, document['path'])
         nx_metadata = ma._extract_nx_metadata(nxid)
         entry = etree.Element(etree.QName(ATOM_NS, "entry"))
         entry = ma._populate_entry(entry, nx_metadata, nxid)        
         root.insert(0, entry)
-        break
 
     # add header info
-    ma._add_merritt_id(root, "ark:/13030/m5rn35s8") # FIXME
+    print "Adding header info to xml tree"
+    ma._add_merritt_id(root, ma.merritt_id)
     ma._add_paging_info(root)
     ma._add_collection_alt_link(root, ma.path)
     ma._add_atom_elements(root)
