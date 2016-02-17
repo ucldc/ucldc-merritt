@@ -9,6 +9,8 @@ from datetime import datetime
 import dateutil.tz
 import pprint
 import urlparse
+from deepharvest.deepharvest_nuxeo import DeepHarvestNuxeo
+from os.path import expanduser
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 pp = pprint.PrettyPrinter()
@@ -22,9 +24,12 @@ NS_MAP = {None: ATOM_NS,
 
 class MerrittAtom():
 
-    def __init__(self, path, pynuxrc='~/.pynuxrc-prod'):
+    def __init__(self, path, pynuxrc=''):
         self.path = path
-        self.nx = utils.Nuxeo(rcfile=pynuxrc)
+        if pynuxrc:
+            self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r')) 
+        elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
+            self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
 
     def _extract_nx_metadata(self, uid): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
@@ -221,19 +226,21 @@ def main(argv=None):
     else:
         ma = MerrittAtom(nx_path)
 
-    documents = ma.nx.children(nx_path) # assuming simple objects only
-    nxids = [document['uid'] for document in documents]
+    dh = DeepHarvestNuxeo(argv.path, '', pynuxrc=argv.pynuxrc)
+    documents = dh.fetch_objects()
 
     # FIXME move this logic into MerrittAtom class
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
 
     # add entries
-    for nxid in nxids:
+    for document in documents:
+        nxid = document['uid']
         nx_metadata = ma._extract_nx_metadata(nxid)
         entry = etree.Element(etree.QName(ATOM_NS, "entry"))
         entry = ma._populate_entry(entry, nx_metadata, nxid)        
         root.insert(0, entry)
+        break
 
     # add header info
     ma._add_merritt_id(root, "ark:/13030/m5rn35s8") # FIXME

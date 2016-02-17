@@ -15,16 +15,14 @@ setup(
     author='Barbara Hui',
     author_email='barbara.hui@ucop.edu',
     dependency_links=[
-        'https://github.com/ucldc/pynux/archive/master.zip#egg=pynux'
+        'https://github.com/ucldc/pynux/archive/master.zip#egg=pynux',
+        'https://github.com/barbarahui/nuxeo-calisphere/archive/master.zip#egg=UCLDC-Deep-Harvester'
     ],
     install_requires=[
         'lxml',
         'pynux',
-        'python-dateutil'
+        'python-dateutil',
+        'UCLDC-Deep-Harvester'
     ],
     test_suite='tests'
 )
-# need lxml
-# need pynux
-# python-dateutil
-# math
