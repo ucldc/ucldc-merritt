@@ -11,6 +11,7 @@ import pprint
 import urlparse
 from deepharvest.deepharvest_nuxeo import DeepHarvestNuxeo
 from os.path import expanduser
+import codecs
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 pp = pprint.PrettyPrinter()
@@ -55,8 +56,22 @@ class MerrittAtom():
             self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r')) 
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
             self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
-        self.merritt_id = 'ark:/13030/m5b58sn8' # FIXME need to map this from the path
+        
+        self.merritt_id = self.get_merritt_id(self.path)
+        if not self.merritt_id:
+            raise KeyError("Could not find path {} in MERRITT_ID_MAP".format(self.path))
+
         self.atom_file = 'nx_mrt_sample.atom'
+
+    def get_merritt_id(self, path):
+        ''' given the Nuxeo path, get corresponding Merritt collection ID '''
+        merritt_id = None
+        path = path.lstrip('/')
+        while len(path.split('/')) > 1:
+            if path in MERRITT_ID_MAP:
+                merritt_id = MERRITT_ID_MAP[path]
+            path = os.path.dirname(path)
+        return merritt_id 
 
     def _extract_nx_metadata(self, uid): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
@@ -205,7 +220,7 @@ class MerrittAtom():
         xml_declaration_string = etree.tostring(xml_declaration, encoding=unicode)
         feed_string = etree.tostring(feed, pretty_print=True, encoding=unicode)
 
-        with open(self.atom_file, "w") as f:
+        with codecs.open(self.atom_file, "w", encoding='utf-8') as f:
             f.write(xml_declaration_string)
             f.write('\n')
             f.write(feed_string)
@@ -254,7 +269,13 @@ def main(argv=None):
     else:
         ma = MerrittAtom(nx_path)
 
-    dh = DeepHarvestNuxeo(argv.path, '', pynuxrc=argv.pynuxrc)
+    print "Merritt Collection ID: {}".format(ma.merritt_id)
+
+    if argv.pynuxrc:
+        dh = DeepHarvestNuxeo(argv.path, '', pynuxrc=argv.pynuxrc)
+    else:
+        dh = DeepHarvestNuxeo(argv.path, '')
+
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
     documents = dh.fetch_objects()
     # TODO: fetch components also
