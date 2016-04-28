@@ -12,6 +12,8 @@ import urlparse
 from deepharvest.deepharvest_nuxeo import DeepHarvestNuxeo
 from os.path import expanduser
 import codecs
+import json
+import requests
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 pp = pprint.PrettyPrinter()
@@ -32,7 +34,7 @@ MERRITT_ID_MAP = {'asset-library/UCM': 'ark:/13030/m5b58sn8',
                   'asset-library/UCB/UCB\ EDA': 'ark:/13030/m500292r',
                   'asset-library/UCR': 'ark:/13030/m5qg11t8',
                   'asset-library/UCSC': 'ark:/13030/m5kq0912'}
-
+REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
 '''
 # following is mapping from Adrian. All are in Nuxeo except for UCSF Library Legacy Tobacco Documents Library
 ark:/13030/m5b58sn8    University of California, Merced Library Nuxeo collections
@@ -50,18 +52,19 @@ ark:/13030/m5kq0912    UC Santa Cruz Nuxeo collections
 
 class MerrittAtom():
 
-    def __init__(self, path, pynuxrc=''):
-        self.path = path
+    def __init__(self, collection_id, pynuxrc=''):
         if pynuxrc:
-            self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r')) 
+            self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
             self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
-        
-        self.merritt_id = self.get_merritt_id(self.path)
-        if not self.merritt_id:
-            raise KeyError("Could not find path {} in MERRITT_ID_MAP".format(self.path))
 
-        self.atom_file = 'nx_mrt_sample.atom'
+        self.collection_id = collection_id
+        self.path = self._get_nuxeo_path()
+        self.merritt_id = self.get_merritt_id(self.path)
+ 
+        self.atom_file = self._get_filename(self.collection_id)
+        if not self.atom_file:
+            raise ValueError("Could not create filename for ATOM feed based on collection id: {}".format(self.collection_id))
 
     def get_merritt_id(self, path):
         ''' given the Nuxeo path, get corresponding Merritt collection ID '''
@@ -72,6 +75,22 @@ class MerrittAtom():
                 merritt_id = MERRITT_ID_MAP[path]
             path = os.path.dirname(path)
         return merritt_id 
+
+    def _get_nuxeo_path(self):
+        ''' given ucldc registry collection ID, get Nuxeo path for collection '''
+        url = "{}collection/{}/?format=json".format(REGISTRY_API_BASE, self.collection_id)
+        res = requests.get(url, headers=self.nx.document_property_headers, auth=self.nx.auth)
+        res.raise_for_status()
+        md = json.loads(res.text)
+        nuxeo_path = md['harvest_extra_data']
+
+        return nuxeo_path 
+
+    def _get_filename(self, collection_id):
+        ''' given Collection ID, get a friendly filename for the ATOM feed '''
+        filename = 'ucldc_collection_{}.atom'.format(collection_id)
+
+        return filename 
 
     def _extract_nx_metadata(self, uid): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
@@ -258,23 +277,23 @@ class MerrittAtom():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
-    parser.add_argument("path", help="Nuxeo document path")
+    parser.add_argument("collection", help="UCLDC Registry Collection ID")
     parser.add_argument("--pynuxrc", help="rc file for use by pynux")
     if argv is None:
         argv = parser.parse_args()
-    nx_path = argv.path
+    collection_id = argv.collection
 
     if argv.pynuxrc:
-        ma = MerrittAtom(nx_path, argv.pynuxrc)
+        ma = MerrittAtom(collection_id, argv.pynuxrc)
     else:
-        ma = MerrittAtom(nx_path)
+        ma = MerrittAtom(collection_id)
 
-    print "Merritt Collection ID: {}".format(ma.merritt_id)
+    print "atom_file: {}".format(ma.atom_file)
 
     if argv.pynuxrc:
-        dh = DeepHarvestNuxeo(argv.path, '', pynuxrc=argv.pynuxrc)
+        dh = DeepHarvestNuxeo(ma.path, '', pynuxrc=argv.pynuxrc)
     else:
-        dh = DeepHarvestNuxeo(argv.path, '')
+        dh = DeepHarvestNuxeo(ma.path, '')
 
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
     documents = dh.fetch_objects()
