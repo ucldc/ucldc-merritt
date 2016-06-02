@@ -14,6 +14,8 @@ from os.path import expanduser
 import codecs
 import json
 import requests
+import boto
+import logging
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 pp = pprint.PrettyPrinter()
@@ -35,6 +37,8 @@ MERRITT_ID_MAP = {'asset-library/UCM': 'ark:/13030/m5b58sn8',
                   'asset-library/UCR': 'ark:/13030/m5qg11t8',
                   'asset-library/UCSC': 'ark:/13030/m5kq0912'}
 REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
+BUCKET = 'static.ucldc.cdlib.org/merritt' # FIXME put this in a conf file
+FEED_BASE_URL = 'https://s3.amazonaws.com/{}/'.format(BUCKET)
 '''
 # following is mapping from Adrian. All are in Nuxeo except for UCSF Library Legacy Tobacco Documents Library
 ark:/13030/m5b58sn8    University of California, Merced Library Nuxeo collections
@@ -53,6 +57,9 @@ ark:/13030/m5kq0912    UC Santa Cruz Nuxeo collections
 class MerrittAtom():
 
     def __init__(self, collection_id, pynuxrc=''):
+
+        self.logger = logging.getLogger(__name__)
+
         if pynuxrc:
             self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
@@ -65,6 +72,8 @@ class MerrittAtom():
         self.atom_file = self._get_filename(self.collection_id)
         if not self.atom_file:
             raise ValueError("Could not create filename for ATOM feed based on collection id: {}".format(self.collection_id))
+
+        self.s3_url = "{}{}".format(FEED_BASE_URL, self.atom_file)
 
     def get_merritt_id(self, path):
         ''' given the Nuxeo path, get corresponding Merritt collection ID '''
@@ -131,7 +140,7 @@ class MerrittAtom():
         doc.insert(0, feed_title)
 
         feed_id = etree.Element(etree.QName(ATOM_NS, "id"))
-        feed_id.text = "http://nuxeo.cdlib.org"
+        feed_id.text = self.s3_url 
         doc.insert(0, feed_id)
 
         return doc 
@@ -157,13 +166,13 @@ class MerrittAtom():
     def _add_paging_info(self, doc):
         ''' add rel links for paging '''
         # this is just dumb for now
-        last_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="last", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        last_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="last", href=self.s3_url)
         doc.insert(0, last_link)
 
-        first_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="first", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        first_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="first", href=self.s3_url)
         doc.insert(0, first_link)
 
-        self_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="self", href="https://s3.amazonaws.com/static.ucldc.cdlib.org/merritt/nx_mrt_sample.atom")
+        self_link = etree.Element(etree.QName(ATOM_NS, "link"), rel="self", href=self.s3_url)
         doc.insert(0, self_link)
 
     def _add_merritt_id(self, doc, merritt_collection_id):
@@ -232,7 +241,7 @@ class MerrittAtom():
 
         return entry
 
-    def _publish_feed(self, doc):
+    def _write_feed(self, doc):
         ''' publish feed '''
         feed = etree.ElementTree(doc)
         xml_declaration = etree.ProcessingInstruction('xml', 'version="1.0" encoding="utf-8"')
@@ -244,8 +253,35 @@ class MerrittAtom():
             f.write('\n')
             f.write(feed_string)
       
-        print "Feed written to file: {}".format(self.atom_file)
-        # TODO host feed
+    def _s3_stash(self):
+       """ Stash file in S3 bucket. 
+       """
+       s3_url = 's3://{}/{}'.format(BUCKET, self.atom_file)
+       bucketpath = BUCKET.strip("/")
+       bucketbase = BUCKET.split("/")[0]
+       parts = urlparse.urlsplit(s3_url)
+       mimetype = 'application/xml' 
+       
+       conn = boto.connect_s3()
+
+       try:
+           bucket = conn.get_bucket(bucketbase)
+       except boto.exception.S3ResponseError:
+           bucket = conn.create_bucket(bucketbase)
+           self.logger.info("Created S3 bucket {}".format(bucketbase))
+
+       if not(bucket.get_key(parts.path)):
+           key = bucket.new_key(parts.path)
+           key.set_metadata("Content-Type", mimetype)
+           key.set_contents_from_filename(self.atom_file)
+           msg = "created {0}".format(s3_url)
+           self.logger.info(msg)
+       else:
+           key = bucket.get_key(parts.path)
+           key.set_metadata("Content-Type", mimetype)
+           key.set_contents_from_filename(self.atom_file)
+           msg = "re-uploaded {}".format(s3_url)
+           self.logger.info(msg)
 
     def get_object_view_url(self, nuxeo_id):
         """ Get object view URL """
@@ -295,6 +331,7 @@ def main(argv=None):
     else:
         dh = DeepHarvestNuxeo(ma.path, '')
 
+    print "Nuxeo path: {}".format(ma.path)
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
     documents = dh.fetch_objects()
     # TODO: fetch components also
@@ -319,7 +356,11 @@ def main(argv=None):
     ma._add_atom_elements(root)
     ma._add_feed_updated(root, ma.last_update)
 
-    ma._publish_feed(root)
+    ma._write_feed(root)
+    print "Feed written to file: {}".format(ma.atom_file)
+
+    ma._s3_stash()
+    print "Feed stashed on s3: {}".format(ma.s3_url)
 
 if __name__ == "__main__":
     sys.exit(main())
