@@ -126,11 +126,11 @@ class MerrittAtom():
 
         return metadata
 
-    def _construct_entry(self, uid):
+    def _construct_entry(self, uid, is_parent):
         ''' construct ATOM feed entry element for a given nuxeo doc '''
         nx_metadata = self._extract_nx_metadata(uid)
         entry = etree.Element(etree.QName(ATOM_NS, "entry"))
-        entry = self._populate_entry(entry, nx_metadata, uid)
+        entry = self._populate_entry(entry, nx_metadata, uid, is_parent)
 
         return entry
 
@@ -189,7 +189,7 @@ class MerrittAtom():
         merritt_id.text = merritt_collection_id 
         doc.insert(0, merritt_id)
 
-    def _populate_entry(self, entry, metadata, nxid):
+    def _populate_entry(self, entry, metadata, nxid, is_parent):
         ''' get <entry> element for a given set of object metadata '''
 
         # atom id (URI)
@@ -214,8 +214,9 @@ class MerrittAtom():
         full_metadata_url = self.get_full_metadata(nxid)
         link_md = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=full_metadata_url, type="application/xml", title="Full metadata for this object from Nuxeo")
 
-        media_json_url = self.get_media_json_url(nxid)
-        link_media_json = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=media_json_url, type="application/json", title="Deep Harvest metadata for this object")
+        if is_parent:
+            media_json_url = self.get_media_json_url(nxid)
+            link_media_json = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=media_json_url, type="application/json", title="Deep Harvest metadata for this object")
 
         nxpath = self.nx.get_metadata(uid=nxid)['path']
         nuxeo_file_download_url = self.get_object_download_url(nxid, nxpath)
@@ -252,13 +253,9 @@ class MerrittAtom():
     def _write_feed(self, doc):
         ''' publish feed '''
         feed = etree.ElementTree(doc)
-        xml_declaration = etree.ProcessingInstruction('xml', 'version="1.0" encoding="utf-8"')
-        xml_declaration_string = etree.tostring(xml_declaration, encoding=unicode)
-        feed_string = etree.tostring(feed, pretty_print=True, encoding=unicode)
+        feed_string = etree.tostring(feed, pretty_print=True, encoding='utf-8', xml_declaration=True)
 
-        with codecs.open(self.atom_file, "w", encoding='utf-8') as f:
-            f.write(xml_declaration_string)
-            f.write('\n')
+        with open(self.atom_file, "w") as f:
             f.write(feed_string)
       
     def _s3_stash(self):
@@ -354,12 +351,12 @@ def main(argv=None):
         print "working on document: {} {}".format(nxid, document['path'])
 
         # parent
-        entry = ma._construct_entry(nxid)
+        entry = ma._construct_entry(nxid, True)
         print "inserting entry for parent object {} {}".format(nxid, document['path'])
         root.insert(0, entry)
 
         # children
-        component_entries = [ma._construct_entry(c['uid']) for c in dh.fetch_components(document)]
+        component_entries = [ma._construct_entry(c['uid'], False) for c in dh.fetch_components(document)]
         for ce in component_entries:
             print "inserting entry for component: {} {}".format(nxid, document['path'])
             root.insert(0, ce)
