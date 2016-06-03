@@ -126,6 +126,14 @@ class MerrittAtom():
 
         return metadata
 
+    def _construct_entry(self, uid):
+        ''' construct ATOM feed entry element for a given nuxeo doc '''
+        nx_metadata = self._extract_nx_metadata(uid)
+        entry = etree.Element(etree.QName(ATOM_NS, "entry"))
+        entry = self._populate_entry(entry, nx_metadata, uid)
+
+        return entry
+
     def _add_atom_elements(self, doc):
         ''' add atom feed elements to document '''
 
@@ -325,6 +333,7 @@ def main(argv=None):
         ma = MerrittAtom(collection_id)
 
     print "atom_file: {}".format(ma.atom_file)
+    print "ma.path: {}".format(ma.path)
 
     if argv.pynuxrc:
         dh = DeepHarvestNuxeo(ma.path, '', pynuxrc=argv.pynuxrc)
@@ -342,11 +351,18 @@ def main(argv=None):
     # add entries
     for document in documents:
         nxid = document['uid']
-        print "constructing entry for {} {}".format(nxid, document['path'])
-        nx_metadata = ma._extract_nx_metadata(nxid)
-        entry = etree.Element(etree.QName(ATOM_NS, "entry"))
-        entry = ma._populate_entry(entry, nx_metadata, nxid)        
+        print "working on document: {} {}".format(nxid, document['path'])
+
+        # parent
+        entry = ma._construct_entry(nxid)
+        print "inserting entry for parent object {} {}".format(nxid, document['path'])
         root.insert(0, entry)
+
+        # children
+        component_entries = [ma._construct_entry(c['uid']) for c in dh.fetch_components(document)]
+        for ce in component_entries:
+            print "inserting entry for component: {} {}".format(nxid, document['path'])
+            root.insert(0, ce)
 
     # add header info
     print "Adding header info to xml tree"
