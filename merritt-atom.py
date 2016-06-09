@@ -305,7 +305,7 @@ class MerrittAtom():
         """ Get object file download URL. We should really put this logic in pynux """
         parts = urlparse.urlsplit(self.nx.conf["api"])
         filename = nuxeo_path.split('/')[-1]
-        url = '{}://{}/Nuxeo/nxbigfile/default/{}/file:content/{}'.format(parts.scheme, parts.netloc, nuxeo_id, filename)
+        url = 'https://{}/Nuxeo/nxbigfile/default/{}/file:content/{}'.format(parts.netloc, nuxeo_id, filename)
 
         return url
 
@@ -315,6 +315,13 @@ class MerrittAtom():
         url = "https://s3.amazonaws.com/static.ucldc.cdlib.org/media_json/{}-media.json".format(nuxeo_id)
 
         return url
+
+    def get_aux_file_urls(self, metadata):
+        ''' get auxiliary file urls '''
+        # example of attachment: https://nuxeo.cdlib.org/Nuxeo/nxbigfile/default/b618bb6f-4d9f-48f5-9615-8dd719ef6a90/files:files/0/file/ucm_dr_003_018.tif
+        # example of legacy extra_files: https://nuxeo.cdlib.org/Nuxeo/nxbigfile/default/85780c00-f8f6-4978-ac12-d161439a65a7/extra_files:extra_files:file/0/blob/gen_n7433_4j336a43_001.dng 
+        urls = []
+        return urls 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
