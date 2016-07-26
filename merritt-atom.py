@@ -88,7 +88,7 @@ class MerrittAtom():
     def _get_nuxeo_path(self):
         ''' given ucldc registry collection ID, get Nuxeo path for collection '''
         url = "{}collection/{}/?format=json".format(REGISTRY_API_BASE, self.collection_id)
-        res = requests.get(url, headers=self.nx.document_property_headers, auth=self.nx.auth)
+        res = requests.get(url)
         res.raise_for_status()
         md = json.loads(res.text)
         nuxeo_path = md['harvest_extra_data']
@@ -218,9 +218,14 @@ class MerrittAtom():
             media_json_url = self.get_media_json_url(nxid)
             link_media_json = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=media_json_url, type="application/json", title="Deep Harvest metadata for this object")
 
-        nxpath = self.nx.get_metadata(uid=nxid)['path']
+        nx_metadata = self.nx.get_metadata(uid=nxid)
+        nxpath = nx_metadata['path']
         nuxeo_file_download_url = self.get_object_download_url(nxid, nxpath)
-        link_object_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url) # FIXME add content_type
+        link_object_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
+
+        aux_file_urls = self.get_aux_file_urls(nx_metadata)
+        for af in aux_file_urls:
+            link_aux_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=af, title="Auxiliary file")
 
         # dc creator
         for creator_name in metadata['creator']:
@@ -318,9 +323,23 @@ class MerrittAtom():
 
     def get_aux_file_urls(self, metadata):
         ''' get auxiliary file urls '''
-        # example of attachment: https://nuxeo.cdlib.org/Nuxeo/nxbigfile/default/b618bb6f-4d9f-48f5-9615-8dd719ef6a90/files:files/0/file/ucm_dr_003_018.tif
-        # example of legacy extra_files: https://nuxeo.cdlib.org/Nuxeo/nxbigfile/default/85780c00-f8f6-4978-ac12-d161439a65a7/extra_files:extra_files:file/0/blob/gen_n7433_4j336a43_001.dng 
         urls = []
+        
+        # get any "attachment" files
+        if metadata['properties']['files:files']:
+            attachments = metadata['properties']['files:files']
+            for attachment in attachments:
+                url = attachment['file']['data']
+                url = url.replace('/nuxeo/', '/Nuxeo/')
+                urls.append(url) 
+
+        # get any "extra_file" files
+        if metadata['properties']['extra_files:file']:
+            for extra_file in metadata['properties']['extra_files:file']:
+                url = extra_file['blob']['data']
+                url = url.replace('/nuxeo/', '/Nuxeo/')
+                urls.append(url)
+
         return urls 
 
 def main(argv=None):
@@ -347,7 +366,6 @@ def main(argv=None):
     print "Nuxeo path: {}".format(ma.path)
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
     documents = dh.fetch_objects()
-    # TODO: fetch components also
 
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
