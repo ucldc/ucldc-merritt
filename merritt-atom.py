@@ -220,7 +220,7 @@ class MerrittAtom():
 
         nx_metadata = self.nx.get_metadata(uid=nxid)
         nxpath = nx_metadata['path']
-        nuxeo_file_download_url = self.get_object_download_url(nxid, nxpath)
+        nuxeo_file_download_url = self.get_object_download_url(nx_metadata)
         link_object_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
 
         aux_file_urls = self.get_aux_file_urls(nx_metadata)
@@ -306,12 +306,21 @@ class MerrittAtom():
     
         return url
 
-    def get_object_download_url(self, nuxeo_id, nuxeo_path):
-        """ Get object file download URL. We should really put this logic in pynux """
-        parts = urlparse.urlsplit(self.nx.conf["api"])
-        filename = nuxeo_path.split('/')[-1]
-        url = 'https://{}/Nuxeo/nxbigfile/default/{}/file:content/{}'.format(parts.netloc, nuxeo_id, filename)
+    def get_object_download_url(self, metadata):
+        ''' given the full metadata for an object, get file download url '''
+        try:
+            file_content = metadata['properties']['file:content']
+        except KeyError:
+            raise KeyError("Nuxeo object metadata does not contain 'properties/file:content' element. Make sure 'X-NXDocumentProperties' provided in pynux conf includes 'file'")
 
+        if file_content is None:
+            return None
+        else:
+            url = file_content['data']
+
+        # make available via basic auth
+        url = url.replace('/nuxeo/', '/Nuxeo/')
+     
         return url
 
     def get_media_json_url(self, nuxeo_id):
