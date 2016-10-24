@@ -39,11 +39,10 @@ The JSON file can be used to interpret the complex object structure. In the JSON
       "label": "General view",
       "id": "ddd02f15-5fee-44a1-9f99-1bcda6e36436"
     },
+    {
       "href": "https://nuxeo.cdlib.org/nuxeo/nxbigfile/default/dda4ca90-c5b7-4ec4-9fcd-3b2e394ef050/file:content/gen_n7433_4m648h47_003.TIF",
       "label": "Detail view",
       "id": "dda4ca90-c5b7-4ec4-9fcd-3b2e394ef050"
-    {
-    
     }
   ]
 }
