@@ -34,10 +34,10 @@ The JSON file can be used to interpret the complex object structure. In the JSON
 (https://merritt-stage.cdlib.org/d/ark%3A%2F99999%2Ffk4mk6km9t/1/producer%2Fs3.amazonaws.com%2Fstatic.ucldc.cdlib.org%2Fmedia_json%2F5bdd2118-e3e1-4a5c-b2e9-7675fbdc8106-media.json)
 ```
 
-The individual XML files comprise the complete metadata records.  Note that the XML files also reflect their associated content files, in the <schema name="file"> and <schema name="extra_files"> entries.  In the example object, <schema name="file"> points to the main content file (a TIFF) and <schema name="extra_files"> points to the auxiliary files (DNG files).   
+The individual XML files comprise the complete metadata records.  Note that the XML files also reflect their associated content files, in the `<schema name="file">` and `<schema name="extra_files">` entries.  In the example object, `<schema name="file">` points to the main content file (a TIFF) and `<schema name="extra_files">` points to the auxiliary files (DNG files).   
 
 
-(Note that the <picture:views> entries for JPEG files can be ignored: the <picture:views> reference derivative images generated within Nuxeo for display in that context; those files are not deposited into Merritt).
+(Note that the `<picture:views>` entries for JPEG files can be ignored: the `<picture:views>` reference derivative images generated within Nuxeo for display in that context; those files are not deposited into Merritt).
 
 
 
