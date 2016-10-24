@@ -4,7 +4,8 @@ Code for pushing Nuxeo content into Merritt.
 
 ----------------
 
-##Interpreting the results of deposits from Nuxeo to Merritt</b><br>
+##Interpreting the results of deposits from Nuxeo to Merritt
+
 Each object deposited in Merritt contains the following key files:
 
 
@@ -24,14 +25,28 @@ Main content file and any auxiliary files, imported into Nuxeo.  For complex obj
 JSON file reflects the structure of the object. For complex objects, the JSON will indicate the association between the  parent-level component metadata record and main content file; and likewise, the association between child-level component metadata record and main content file.
 
 
-The JSON file can be used to interpret the complex object structure. In the JSON for the example object listed below, the ID indicates the XML file (Nuxeo metadata record) and the HREF indicates the main content file (a TIFF).
+The JSON file can be used to interpret the complex object structure. In the JSON for the example object listed below, the `"id":` indicates the XML file (Nuxeo metadata record) and the `"href":` indicates the main content file (a TIFF).
 
-```
-"label": "Here comes the band = Ya viene la banda",
-"href": "https://nuxeo.cdlib.org/nuxeo/nxbigfile/default/5bdd2118-e3e1-4a5c-b2e9-7675fbdc8106/file:content/gen_n7433_4m648h47_001.TIF",
-"id": "5bdd2118-e3e1-4a5c-b2e9-7675fbdc8106",
-"structMap":
-(https://merritt-stage.cdlib.org/d/ark%3A%2F99999%2Ffk4mk6km9t/1/producer%2Fs3.amazonaws.com%2Fstatic.ucldc.cdlib.org%2Fmedia_json%2F5bdd2118-e3e1-4a5c-b2e9-7675fbdc8106-media.json)
+[json example simplified]
+```json
+{
+  "label": "Here comes the band = Ya viene la banda",
+  "href": "https://nuxeo.cdlib.org/nuxeo/nxbigfile/default/5bdd2118-e3e1-4a5c-b2e9-7675fbdc8106/file:content/gen_n7433_4m648h47_001.TIF",
+  "id": "5bdd2118-e3e1-4a5c-b2e9-7675fbdc8106",
+  "structMap": [
+    { 
+      "href": "https://nuxeo.cdlib.org/nuxeo/nxbigfile/default/ddd02f15-5fee-44a1-9f99-1bcda6e36436/file:content/gen_n7433_4m648h47_002.TIF",
+      "label": "General view",
+      "id": "ddd02f15-5fee-44a1-9f99-1bcda6e36436"
+    },
+      "href": "https://nuxeo.cdlib.org/nuxeo/nxbigfile/default/dda4ca90-c5b7-4ec4-9fcd-3b2e394ef050/file:content/gen_n7433_4m648h47_003.TIF",
+      "label": "Detail view",
+      "id": "dda4ca90-c5b7-4ec4-9fcd-3b2e394ef050"
+    {
+    
+    }
+  ]
+}
 ```
 
 The individual XML files comprise the complete metadata records.  Note that the XML files also reflect their associated content files, in the `<schema name="file">` and `<schema name="extra_files">` entries.  In the example object, `<schema name="file">` points to the main content file (a TIFF) and `<schema name="extra_files">` points to the auxiliary files (DNG files).   
