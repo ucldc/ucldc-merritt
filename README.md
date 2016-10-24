@@ -4,23 +4,23 @@ Code for pushing Nuxeo content into Merritt.
 
 ----------------
 
-##Interpreting the results
-Each object deposited from Nuxeo into Merritt contains the following key files:
+##Interpreting the results of deposits from Nuxeo to Merritt</b><br>
+Each object deposited in Merritt contains the following key files:
 
 
-1) mrt-erc.txt
+<b>1) mrt-erc.txt</b><br>
 Merritt metadata record for the object.
 
 
-2) XML files
+<b>2) XML files</b><br>
 Nuxeo metadata record. For simple objects, there will be a single metadata record. For complex objects, there will be a metadata record for the parent-level component; there will also be metadata records for each child-level component, if applicable.
 
 
-3) Content files (TIFF, etc.)
+<b>3) Content files (TIFF, etc.)</b><br>
 Main content file and any auxiliary files, imported into Nuxeo.  For complex objects, there will be content files for the parent-level and child-level components.
 
 
-4) JSON file (media.json)
+<b>4) JSON file (media.json)</b><br>
 JSON file reflects the structure of the object. For complex objects, the JSON will indicate the association between the  parent-level component metadata record and main content file; and likewise, the association between child-level component metadata record and main content file.
 
 
