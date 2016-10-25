@@ -35,7 +35,8 @@ MERRITT_ID_MAP = {'asset-library/UCM': 'ark:/13030/m5b58sn8',
                   'asset-library/UCSF/JapaneseWoodblocks': 'ark:/13030/m58w5s1p',
                   'asset-library/UCB/UCB\ EDA': 'ark:/13030/m500292r',
                   'asset-library/UCR': 'ark:/13030/m5qg11t8',
-                  'asset-library/UCSC': 'ark:/13030/m5kq0912'}
+                  'asset-library/UCSC': 'ark:/13030/m5kq0912',
+                  'asset-library/UCI/artists_books': 'ark:/13030/m56d5r8z'}
 REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
 BUCKET = 'static.ucldc.cdlib.org/merritt' # FIXME put this in a conf file
 FEED_BASE_URL = 'https://s3.amazonaws.com/{}/'.format(BUCKET)
@@ -60,15 +61,17 @@ class MerrittAtom():
 
         self.logger = logging.getLogger(__name__)
 
-        if pynuxrc:
-            self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
-        elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
-            self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
-
         self.collection_id = collection_id
         self.path = self._get_nuxeo_path()
         self.merritt_id = self.get_merritt_id(self.path)
- 
+
+        if pynuxrc:
+            self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
+            self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=argv.pynuxrc)
+        elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
+            self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
+            self.dh = DeepHarvestNuxeo(self.path, '')
+
         self.atom_file = self._get_filename(self.collection_id)
         if not self.atom_file:
             raise ValueError("Could not create filename for ATOM feed based on collection id: {}".format(self.collection_id))
@@ -79,10 +82,13 @@ class MerrittAtom():
         ''' given the Nuxeo path, get corresponding Merritt collection ID '''
         merritt_id = None
         path = path.lstrip('/')
+        fullpath = path
         while len(path.split('/')) > 1:
             if path in MERRITT_ID_MAP:
                 merritt_id = MERRITT_ID_MAP[path]
             path = os.path.dirname(path)
+        if merritt_id is None:
+            raise KeyError("Could not find match for '{}' in MERRITT_ID_MAP".format(fullpath))
         return merritt_id 
 
     def _get_nuxeo_path(self):
@@ -131,6 +137,22 @@ class MerrittAtom():
         nx_metadata = self._extract_nx_metadata(uid)
         entry = etree.Element(etree.QName(ATOM_NS, "entry"))
         entry = self._populate_entry(entry, nx_metadata, uid, is_parent)
+
+        return entry
+
+    def _construct_entry_bundled(self, doc):
+        ''' construct ATOM feed entry element for a given nuxeo doc, including files for any component objects '''
+        # parent
+        uid = doc['uid']
+        nx_metadata = self._extract_nx_metadata(uid)
+        entry = etree.Element(etree.QName(ATOM_NS, "entry"))
+        entry = self._populate_entry(entry, nx_metadata, uid, True)
+
+        # insert component md
+        for c in self.dh.fetch_components(doc):
+            self._insert_full_md_link(entry, c['uid'])
+            self._insert_main_content_link(entry, c['uid'])
+            self._insert_aux_links(entry, c['uid'])
 
         return entry
 
@@ -210,22 +232,18 @@ class MerrittAtom():
         atom_author = etree.SubElement(entry, etree.QName(ATOM_NS, "author"))
         atom_author.text = "UC Libraries Digital Collection"
 
-        # atom links - Merritt is reading the component objects from here
-        full_metadata_url = self.get_full_metadata(nxid)
-        link_md = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=full_metadata_url, type="application/xml", title="Full metadata for this object from Nuxeo")
+        # metadata file link
+        self._insert_full_md_link(entry, nxid)
 
+        # media json link
         if is_parent:
-            media_json_url = self.get_media_json_url(nxid)
-            link_media_json = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=media_json_url, type="application/json", title="Deep Harvest metadata for this object")
+            self._insert_media_json_link(entry, nxid)
 
-        nx_metadata = self.nx.get_metadata(uid=nxid)
-        nxpath = nx_metadata['path']
-        nuxeo_file_download_url = self.get_object_download_url(nx_metadata)
-        link_object_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
+        # main content file link
+        self._insert_main_content_link(entry, nxid)
 
-        aux_file_urls = self.get_aux_file_urls(nx_metadata)
-        for af in aux_file_urls:
-            link_aux_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=af, title="Auxiliary file")
+        # auxiliary file link(s)
+        self._insert_aux_links(entry, nxid)
 
         # dc creator
         for creator_name in metadata['creator']:
@@ -254,6 +272,29 @@ class MerrittAtom():
         ucldc_collection_id.text = metadata['collection']
 
         return entry
+
+    def _insert_media_json_link(self, entry, uid):
+        media_json_url = self.get_media_json_url(uid)
+        link_media_json = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=media_json_url, type="application/json", title="Deep Harvest metadata for this object") 
+
+
+    def _insert_main_content_link(self, entry, uid):
+        nx_metadata = self.nx.get_metadata(uid=uid)
+        nuxeo_file_download_url = self.get_object_download_url(nx_metadata)
+        main_content_link = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
+
+
+    def _insert_aux_links(self, entry, uid):
+        nx_metadata = self.nx.get_metadata(uid=uid)
+        aux_file_urls = self.get_aux_file_urls(nx_metadata)
+        for af in aux_file_urls:
+            link_aux_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=af, title="Auxiliary file")
+
+
+    def _insert_full_md_link(self, entry, uid):
+        full_metadata_url = self.get_full_metadata(uid)
+        link_md = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=full_metadata_url, type="application/xml", title="Full metadata for this object from Nuxeo")
+
 
     def _write_feed(self, doc):
         ''' publish feed '''
@@ -367,14 +408,9 @@ def main(argv=None):
     print "atom_file: {}".format(ma.atom_file)
     print "ma.path: {}".format(ma.path)
 
-    if argv.pynuxrc:
-        dh = DeepHarvestNuxeo(ma.path, '', pynuxrc=argv.pynuxrc)
-    else:
-        dh = DeepHarvestNuxeo(ma.path, '')
-
     print "Nuxeo path: {}".format(ma.path)
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
-    documents = dh.fetch_objects()
+    documents = ma.dh.fetch_objects()
 
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
@@ -384,6 +420,12 @@ def main(argv=None):
         nxid = document['uid']
         print "working on document: {} {}".format(nxid, document['path'])
 
+        # object, bundled into one <entry> if complex
+        entry = ma._construct_entry_bundled(document)
+        print "inserting entry for object {} {}".format(nxid, document['path'])
+        root.insert(0, entry)
+
+        '''
         # parent
         entry = ma._construct_entry(nxid, True)
         print "inserting entry for parent object {} {}".format(nxid, document['path'])
@@ -394,6 +436,7 @@ def main(argv=None):
         for ce in component_entries:
             print "inserting entry for component: {} {}".format(nxid, document['path'])
             root.insert(0, ce)
+        '''
 
     # add header info
     print "Adding header info to xml tree"
