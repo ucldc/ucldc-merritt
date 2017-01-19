@@ -26,7 +26,10 @@ NS_MAP = {None: ATOM_NS,
           "nx": NX_NS,
           "dc": DC_NS}
 # we want to implement this mapping in the Registry:
-MERRITT_ID_MAP = {'asset-library/UCM': 'ark:/13030/m5b58sn8',
+MERRITT_ID_MAP = {'asset-library/UCM/Ramicova': 'ark:/13030/m5b58sn8',
+                  'asset-library/UCM/Don Pedro Dam': 'ark:/13030/m5p60962',
+                  'asset-library/UCM/MercedLocalHistoryCollection': 'ark:/13030/m5wm1bf0',
+                  'asset-library/UCM/Assembly Newsletters': 'ark:/13030/m58h37qg',
                   'asset-library/UCSF/School_of_Dentistry_130': 'ark:/13030/m5xp9hp7',
                   'asset-library/UCSF/A_History_of_UCSF': 'ark:/13030/m5sx8rx2',
                   'asset-library/UCSF/30th_General_Hospital': 'ark:/13030/m5p58150',
