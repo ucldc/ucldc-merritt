@@ -70,7 +70,7 @@ class MerrittAtom():
 
         if pynuxrc:
             self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
-            self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=argv.pynuxrc)
+            self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=pynuxrc)
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
             self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
             self.dh = DeepHarvestNuxeo(self.path, '')
