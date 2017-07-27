@@ -7,6 +7,7 @@ from lxml import etree
 from pynux import utils
 from datetime import datetime
 import dateutil.tz
+from dateutil.parser import parse
 import pprint
 import urlparse
 from deepharvest.deepharvest_nuxeo import DeepHarvestNuxeo
@@ -109,6 +110,24 @@ class MerrittAtom():
         filename = 'ucldc_collection_{}.atom'.format(collection_id)
 
         return filename 
+
+    def _get_last_feed_date(self):
+        ''' get the date/time that the feed was last generated
+            return `null` if there isn't one '''
+        # grab ATOM feed from S3
+        feed = self._s3_get_feed()
+
+        if feed is None:
+            return None
+        else:
+           # parse out feed date
+           return 'here is our date'
+
+    def _filter_new_docs(self, all_docs, date_last_feed):
+        ''' create subset of collection docs containing only those that are new
+            or have been modified since the ATOM feed was last created
+        '''
+
 
     def _extract_nx_metadata(self, uid): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
@@ -307,6 +326,22 @@ class MerrittAtom():
         with open(self.atom_file, "w") as f:
             f.write(feed_string)
       
+    def _s3_get_feed(self):
+       """ Retrieve ATOM feed file from S3 """
+       bucketpath = BUCKET.strip("/")
+       bucketbase = BUCKET.split("/")[0]
+       keyparts = bucketpath.split("/")[1:]
+       keyparts.append(self.atom_file)
+       keypath = '/'.join(keyparts)
+
+       conn = boto.connect_s3()
+       bucket = conn.get_bucket(bucketbase)
+       key = bucket.get_key(keypath)
+       if not key: # no ATOM feed has been created yet for this collection
+           return None
+
+       return key.get_contents_as_string()
+
     def _s3_stash(self):
        """ Stash file in S3 bucket. 
        """
@@ -414,6 +449,14 @@ def main(argv=None):
     print "Nuxeo path: {}".format(ma.path)
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
     documents = ma.dh.fetch_objects()
+
+    date_last_feed = ma._get_last_feed_date()
+
+    print "date_last_feed: {}".format(date_last_feed)
+
+    sys.exit()
+
+    # new_docs = ma._filter_new_docs(documents, date_last_feed)
 
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
