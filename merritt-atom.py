@@ -115,13 +115,11 @@ class MerrittAtom():
         ''' get the date/time that the feed was last generated
             return `null` if there isn't one '''
         # grab ATOM feed from S3
-        feed = self._s3_get_feed()
+        root = self._s3_get_feed()
 
-        if feed is None:
-            return None
-        else:
-           # parse out feed date
-           return 'here is our date'
+        # parse out feed date
+        updated_str = root.find('{http://www.w3.org/2005/Atom}updated').text 
+        return parse(updated_str) 
 
     def _filter_new_docs(self, all_docs, date_last_feed):
         ''' create subset of collection docs containing only those that are new
@@ -327,7 +325,7 @@ class MerrittAtom():
             f.write(feed_string)
       
     def _s3_get_feed(self):
-       """ Retrieve ATOM feed file from S3 """
+       """ Retrieve ATOM feed file from S3. Return as ElementTree object """
        bucketpath = BUCKET.strip("/")
        bucketbase = BUCKET.split("/")[0]
        keyparts = bucketpath.split("/")[1:]
@@ -340,7 +338,8 @@ class MerrittAtom():
        if not key: # no ATOM feed has been created yet for this collection
            return None
 
-       return key.get_contents_as_string()
+       feed = key.get_contents_as_string()
+       return etree.fromstring(feed) 
 
     def _s3_stash(self):
        """ Stash file in S3 bucket. 
