@@ -16,6 +16,8 @@ import codecs
 import json
 import requests
 import boto
+import boto3
+import botocore
 import logging
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
@@ -299,14 +301,11 @@ class MerrittAtom():
        keyparts.append(self.atom_file)
        keypath = '/'.join(keyparts)
 
-       conn = boto.connect_s3()
-       bucket = conn.get_bucket(bucketbase)
-       key = bucket.get_key(keypath)
-       if not key: # no ATOM feed has been created yet for this collection
-           return None
+       s3 = boto3.client('s3')
+       response = s3.get_object(Bucket=bucketbase,Key=keypath)
+       contents = response['Body'].read()
 
-       feed = key.get_contents_as_string()
-       return etree.fromstring(feed) 
+       return etree.fromstring(contents) 
 
     def _s3_stash(self):
        """ Stash file in S3 bucket. 
