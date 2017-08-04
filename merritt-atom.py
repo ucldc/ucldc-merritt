@@ -26,38 +26,9 @@ NX_NS = "http://www.nuxeo.org/ecm/project/schemas/tingle-california-digita/ucldc
 NS_MAP = {None: ATOM_NS,
           "nx": NX_NS,
           "dc": DC_NS}
-# we want to implement this mapping in the Registry:
-MERRITT_ID_MAP = {'asset-library/UCM/Ramicova': 'ark:/13030/m5b58sn8',
-                  'asset-library/UCM/Don Pedro Dam': 'ark:/13030/m5p60962',
-                  'asset-library/UCM/MercedLocalHistoryCollection': 'ark:/13030/m5wm1bf0',
-                  'asset-library/UCM/Assembly Newsletters': 'ark:/13030/m58h37qg',
-                  'asset-library/UCSF/School_of_Dentistry_130': 'ark:/13030/m5xp9hp7',
-                  'asset-library/UCSF/A_History_of_UCSF': 'ark:/13030/m5sx8rx2',
-                  'asset-library/UCSF/30th_General_Hospital': 'ark:/13030/m5p58150',
-                  'asset-library/UCSF/Day_Robert_L_Collection': 'ark:/13030/m5dn6hr0',
-                  'asset-library/UCSF/Photograph_collection': 'ark:/13030/m5jd78gq',
-                  'asset-library/UCSF/JapaneseWoodblocks': 'ark:/13030/m58w5s1p',
-                  'asset-library/UCB/UCB\ EDA': 'ark:/13030/m500292r',
-                  'asset-library/UCR': 'ark:/13030/m5qg11t8',
-                  'asset-library/UCSC': 'ark:/13030/m5kq0912',
-                  'asset-library/UCI/artists_books': 'ark:/13030/m56d5r8z'}
 REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
 BUCKET = 'static.ucldc.cdlib.org/merritt' # FIXME put this in a conf file
 FEED_BASE_URL = 'https://s3.amazonaws.com/{}/'.format(BUCKET)
-'''
-# following is mapping from Adrian. All are in Nuxeo except for UCSF Library Legacy Tobacco Documents Library
-ark:/13030/m5b58sn8    University of California, Merced Library Nuxeo collections
-ark:/13030/m52c19rr      UCSF Library Legacy Tobacco Documents Library
-ark:/13030/m5xp9hp7   UCSF Library School of Dentistry 130th Anniversary
-ark:/13030/m5sx8rx2     UCSF Library A History of UCSF
-ark:/13030/m5p58150    UCSF Library 30th General Hospital
-ark:/13030/m5dn6hr0    UCSF Library Robert L. Day Image Collection
-ark:/13030/m5jd78gq     UCSF Library Photograph Collection
-ark:/13030/m58w5s1p   UCSF Library Japanese Woodblock Print Collection
-ark:/13030/m500292r     UC Berkeley Environmental Design Archives Nuxeo collections
-ark:/13030/m5qg11t8     UC Riverside Nuxeo collections
-ark:/13030/m5kq0912    UC Santa Cruz Nuxeo collections
-'''
 
 class MerrittAtom():
 
@@ -67,7 +38,7 @@ class MerrittAtom():
 
         self.collection_id = collection_id
         self.path = self._get_nuxeo_path()
-        self.merritt_id = self.get_merritt_id(self.path)
+        self.merritt_id = self._get_merritt_id()
 
         if pynuxrc:
             self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
@@ -82,17 +53,16 @@ class MerrittAtom():
 
         self.s3_url = "{}{}".format(FEED_BASE_URL, self.atom_file)
 
-    def get_merritt_id(self, path):
-        ''' given the Nuxeo path, get corresponding Merritt collection ID '''
-        merritt_id = None
-        path = path.lstrip('/')
-        fullpath = path
-        while len(path.split('/')) > 1:
-            if path in MERRITT_ID_MAP:
-                merritt_id = MERRITT_ID_MAP[path]
-            path = os.path.dirname(path)
-        if merritt_id is None:
-            raise KeyError("Could not find match for '{}' in MERRITT_ID_MAP".format(fullpath))
+        self.last_feed_tree = self._s3_get_feed()
+
+    def _get_merritt_id(self):
+        ''' given collection registry ID, get corresponding Merritt collection ID '''
+        url = "{}collection/{}/?format=json".format(REGISTRY_API_BASE, self.collection_id)
+        res = requests.get(url)
+        res.raise_for_status()
+        md = json.loads(res.text)
+        merritt_id = md['merritt_id']
+
         return merritt_id 
 
     def _get_nuxeo_path(self):
@@ -115,17 +85,14 @@ class MerrittAtom():
         ''' get the date/time that the feed was last generated
             return `null` if there isn't one '''
         # grab ATOM feed from S3
-        root = self._s3_get_feed()
+        root = self.last_feed_tree
 
-        # parse out feed date
-        updated_str = root.find('{http://www.w3.org/2005/Atom}updated').text 
-        return parse(updated_str) 
-
-    def _filter_new_docs(self, all_docs, date_last_feed):
-        ''' create subset of collection docs containing only those that are new
-            or have been modified since the ATOM feed was last created
-        '''
-
+        if root is None:
+            return None
+        else:
+            # parse out feed date
+            updated_str = root.find('{http://www.w3.org/2005/Atom}updated').text 
+            return parse(updated_str) 
 
     def _extract_nx_metadata(self, uid): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
@@ -443,8 +410,6 @@ def main(argv=None):
         ma = MerrittAtom(collection_id)
 
     print "atom_file: {}".format(ma.atom_file)
-    print "ma.path: {}".format(ma.path)
-
     print "Nuxeo path: {}".format(ma.path)
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
     documents = ma.dh.fetch_objects()
@@ -455,15 +420,17 @@ def main(argv=None):
 
     sys.exit()
 
-    # new_docs = ma._filter_new_docs(documents, date_last_feed)
-
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
 
     # add entries
-    for document in documents:
+    for document in new_docs:
         nxid = document['uid']
         print "working on document: {} {}".format(nxid, document['path'])
+
+        # get date this was last modified
+        last_mod_str = document['lastModified']
+        last_mod_datetime = parse(last_mod_str)
 
         # object, bundled into one <entry> if complex
         entry = ma._construct_entry_bundled(document)
