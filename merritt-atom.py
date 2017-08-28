@@ -42,6 +42,9 @@ class MerrittAtom():
         self.path = self._get_nuxeo_path()
         self.merritt_id = self._get_merritt_id()
 
+        if not self.merritt_id:
+            raise ValueError("No Merritt ID for this collection")
+
         if pynuxrc:
             self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
             self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=pynuxrc)
