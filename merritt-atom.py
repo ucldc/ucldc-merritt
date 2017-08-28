@@ -19,6 +19,7 @@ import boto
 import boto3
 import botocore
 import logging
+from operator import itemgetter
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 pp = pprint.PrettyPrinter()
@@ -99,11 +100,13 @@ class MerrittAtom():
             updated_str = root.find('{http://www.w3.org/2005/Atom}updated').text 
             return parse(updated_str) 
 
-    def _extract_nx_metadata(self, uid): 
+    def _extract_nx_metadata(self, raw_metadata): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
-        raw_metadata = self.nx.get_metadata(uid=uid)
         metadata = {}
         
+        # last modified 
+        metadata['lastModified'] = raw_metadata['bundle_lastModified']
+
         # creator
         creators = raw_metadata['properties']['ucldc_schema:creator']
         metadata['creator'] = [creator['name'] for creator in creators]
@@ -124,19 +127,12 @@ class MerrittAtom():
 
         return metadata
 
-    def _construct_entry(self, uid, is_parent):
-        ''' construct ATOM feed entry element for a given nuxeo doc '''
-        nx_metadata = self._extract_nx_metadata(uid)
-        entry = etree.Element(etree.QName(ATOM_NS, "entry"))
-        entry = self._populate_entry(entry, nx_metadata, uid, is_parent)
-
-        return entry
-
     def _construct_entry_bundled(self, doc):
         ''' construct ATOM feed entry element for a given nuxeo doc, including files for any component objects '''
-        # parent
         uid = doc['uid']
-        nx_metadata = self._extract_nx_metadata(uid)
+
+        # parent
+        nx_metadata = self._extract_nx_metadata(doc)
         entry = etree.Element(etree.QName(ATOM_NS, "entry"))
         entry = self._populate_entry(entry, nx_metadata, uid, True)
 
@@ -217,8 +213,7 @@ class MerrittAtom():
  
         # atom updated
         atom_updated = etree.SubElement(entry, etree.QName(ATOM_NS, "updated"))
-        atom_updated.text = datetime.now(dateutil.tz.tzutc()).isoformat()
-        self.last_update = atom_updated.text
+        atom_updated.text = metadata['lastModified'].isoformat()
 
         # atom author
         atom_author = etree.SubElement(entry, etree.QName(ATOM_NS, "author"))
@@ -273,7 +268,8 @@ class MerrittAtom():
     def _insert_main_content_link(self, entry, uid):
         nx_metadata = self.nx.get_metadata(uid=uid)
         nuxeo_file_download_url = self.get_object_download_url(nx_metadata)
-        main_content_link = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
+        if nuxeo_file_download_url:
+            main_content_link = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
 
 
     def _insert_aux_links(self, entry, uid):
@@ -398,6 +394,29 @@ class MerrittAtom():
 
         return urls 
 
+    def _bundle_docs(self, docs):
+        ''' given a dict of parent level nuxeo docs, fetch any components
+            and also figure out when any part of the object was most 
+            recently modified/added '''
+
+        for doc in docs:
+
+            last_mod_str = doc['lastModified']
+            overall_mod_datetime = parse(last_mod_str)
+
+            doc['components'] = []
+            
+            for c in doc['components']:
+                mod_str = c['lastModified']
+                mod_datetime = parse(mod_str)
+        
+                if mod_datetime > overall_mod_datetime:
+                    overall_mod_datetime = mod_datetime 
+
+            doc['bundle_lastModified'] = overall_mod_datetime
+
+        return docs 
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
     parser.add_argument("collection", help="UCLDC Registry Collection ID")
@@ -414,43 +433,23 @@ def main(argv=None):
     print "atom_file: {}".format(ma.atom_file)
     print "Nuxeo path: {}".format(ma.path)
     print "Fetching Nuxeo docs. This could take a while if collection is large..."
-    documents = ma.dh.fetch_objects()
-
-    date_last_feed = ma._get_last_feed_date()
-
-    print "date_last_feed: {}".format(date_last_feed)
-
-    sys.exit()
+    parent_docs = ma.dh.fetch_objects()
+    
+    bundled_docs = ma._bundle_docs(parent_docs)
+    bundled_docs.sort(key=itemgetter('bundle_lastModified'))
 
     # create root
     root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
 
     # add entries
-    for document in new_docs:
+    for document in bundled_docs: 
         nxid = document['uid']
         print "working on document: {} {}".format(nxid, document['path'])
-
-        # get date this was last modified
-        last_mod_str = document['lastModified']
-        last_mod_datetime = parse(last_mod_str)
 
         # object, bundled into one <entry> if complex
         entry = ma._construct_entry_bundled(document)
         print "inserting entry for object {} {}".format(nxid, document['path'])
         root.insert(0, entry)
-
-        '''
-        # parent
-        entry = ma._construct_entry(nxid, True)
-        print "inserting entry for parent object {} {}".format(nxid, document['path'])
-        root.insert(0, entry)
-
-        # children
-        component_entries = [ma._construct_entry(c['uid'], False) for c in dh.fetch_components(document)]
-        for ce in component_entries:
-            print "inserting entry for component: {} {}".format(nxid, document['path'])
-            root.insert(0, ce)
-        '''
 
     # add header info
     print "Adding header info to xml tree"
@@ -458,13 +457,13 @@ def main(argv=None):
     ma._add_paging_info(root)
     ma._add_collection_alt_link(root, ma.path)
     ma._add_atom_elements(root)
-    ma._add_feed_updated(root, ma.last_update)
+    ma._add_feed_updated(root, datetime.now(dateutil.tz.tzutc()).isoformat())
 
     ma._write_feed(root)
     print "Feed written to file: {}".format(ma.atom_file)
 
-    ma._s3_stash()
-    print "Feed stashed on s3: {}".format(ma.s3_url)
+    #ma._s3_stash()
+    #print "Feed stashed on s3: {}".format(ma.s3_url)
 
 if __name__ == "__main__":
     sys.exit(main())
