@@ -30,24 +30,41 @@ NS_MAP = {None: ATOM_NS,
           "nx": NX_NS,
           "dc": DC_NS}
 REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
-BUCKET = 'static.ucldc.cdlib.org/merritt' # FIXME put this in a conf file
-FEED_BASE_URL = 'https://s3.amazonaws.com/{}/'.format(BUCKET)
+BUCKET = 'static.ucldc.cdlib.org/merritt'
 
 class MerrittAtom():
 
-    def __init__(self, collection_id, pynuxrc=''):
+    def __init__(self, collection_id, **kwargs):
 
         self.logger = logging.getLogger(__name__)
 
         self.collection_id = collection_id
+
+        if 'bucket' in kwargs:
+            self.bucket = kwargs['bucket']
+        else:
+            self.bucket = BUCKET
+
+        if 'pynuxrc' in kwargs:
+            pynuxrc = kwargs['pynuxrc']
+        else:
+            pynuxrc = None
+
+        if 'dir' in kwargs:
+            dir = kwargs['dir']
+        else:
+            dir = '.'
+
         self.path = self._get_nuxeo_path()
         self.merritt_id = self._get_merritt_id()
 
         if not self.merritt_id:
             raise ValueError("No Merritt ID for this collection")
 
+        self.feed_base_url = 'https://s3.amazonaws.com/{}/'.format(self.bucket)
+
         if pynuxrc:
-            self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
+            self.nx = utils.Nuxeo(rcfile=open(expanduser(pynuxrc),'r'))
             self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=pynuxrc)
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
             self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
@@ -57,7 +74,9 @@ class MerrittAtom():
         if not self.atom_file:
             raise ValueError("Could not create filename for ATOM feed based on collection id: {}".format(self.collection_id))
 
-        self.s3_url = "{}{}".format(FEED_BASE_URL, self.atom_file)
+        self.s3_url = "{}{}".format(self.feed_base_url, self.atom_file)
+
+        self.atom_filepath = os.path.join(dir, self.atom_file)
 
         self.last_feed_tree = self._s3_get_feed()
 
@@ -289,13 +308,13 @@ class MerrittAtom():
         feed = etree.ElementTree(doc)
         feed_string = etree.tostring(feed, pretty_print=True, encoding='utf-8', xml_declaration=True)
 
-        with open(self.atom_file, "w") as f:
+        with open(self.atom_filepath, "w") as f:
             f.write(feed_string)
       
     def _s3_get_feed(self):
        """ Retrieve ATOM feed file from S3. Return as ElementTree object """
-       bucketpath = BUCKET.strip("/")
-       bucketbase = BUCKET.split("/")[0]
+       bucketpath = self.bucket.strip("/")
+       bucketbase = self.bucket.split("/")[0]
        keyparts = bucketpath.split("/")[1:]
        keyparts.append(self.atom_file)
        keypath = '/'.join(keyparts)
@@ -309,9 +328,9 @@ class MerrittAtom():
     def _s3_stash(self):
        """ Stash file in S3 bucket. 
        """
-       s3_url = 's3://{}/{}'.format(BUCKET, self.atom_file)
-       bucketpath = BUCKET.strip("/")
-       bucketbase = BUCKET.split("/")[0]
+       s3_url = 's3://{}/{}'.format(self.bucket, self.atom_file)
+       bucketpath = self.bucket.strip("/")
+       bucketbase = self.bucket.split("/")[0]
        parts = urlparse.urlsplit(s3_url)
        mimetype = 'application/xml' 
        
@@ -421,14 +440,24 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
     parser.add_argument("collection", help="UCLDC Registry Collection ID")
     parser.add_argument("--pynuxrc", help="rc file for use by pynux")
+    parser.add_argument("--bucket", help="S3 bucket where feed is stashed")
+    parser.add_argument("--dir", help="local directory where feed is written" )
+    parser.add_argument("--nostash", action='store_true', help="write feed to local directory and do not stash on S3")
+
     if argv is None:
         argv = parser.parse_args()
+
     collection_id = argv.collection
 
+    kwargs = {}
     if argv.pynuxrc:
-        ma = MerrittAtom(collection_id, argv.pynuxrc)
-    else:
-        ma = MerrittAtom(collection_id)
+        kwargs['pynuxrc'] = argv.pynuxrc
+    if argv.bucket:
+        kwargs['bucket'] = argv.bucket
+    if argv.dir:
+        kwargs['dir'] = argv.dir
+
+    ma = MerrittAtom(collection_id, **kwargs)
 
     print "atom_file: {}".format(ma.atom_file)
     print "Nuxeo path: {}".format(ma.path)
@@ -460,10 +489,11 @@ def main(argv=None):
     ma._add_feed_updated(root, datetime.now(dateutil.tz.tzutc()).isoformat())
 
     ma._write_feed(root)
-    print "Feed written to file: {}".format(ma.atom_file)
+    print "Feed written to file: {}".format(ma.atom_filepath)
 
-    #ma._s3_stash()
-    #print "Feed stashed on s3: {}".format(ma.s3_url)
+    if not argv.nostash:
+        ma._s3_stash()
+        print "Feed stashed on s3: {}".format(ma.s3_url)
 
 if __name__ == "__main__":
     sys.exit(main())
