@@ -15,9 +15,7 @@ from os.path import expanduser
 import codecs
 import json
 import requests
-import boto
 import boto3
-import botocore
 import logging
 from operator import itemgetter
 
@@ -326,34 +324,17 @@ class MerrittAtom():
        return etree.fromstring(contents) 
 
     def _s3_stash(self):
-       """ Stash file in S3 bucket. 
+       """ Stash file in S3 bucket.
        """
-       s3_url = 's3://{}/{}'.format(self.bucket, self.atom_file)
        bucketpath = self.bucket.strip("/")
        bucketbase = self.bucket.split("/")[0]
-       parts = urlparse.urlsplit(s3_url)
-       mimetype = 'application/xml' 
-       
-       conn = boto.connect_s3()
+       keyparts = bucketpath.split("/")[1:]
+       keyparts.append(self.atom_file)
+       keypath = '/'.join(keyparts)
 
-       try:
-           bucket = conn.get_bucket(bucketbase)
-       except boto.exception.S3ResponseError:
-           bucket = conn.create_bucket(bucketbase)
-           self.logger.info("Created S3 bucket {}".format(bucketbase))
-
-       if not(bucket.get_key(parts.path)):
-           key = bucket.new_key(parts.path)
-           key.set_metadata("Content-Type", mimetype)
-           key.set_contents_from_filename(self.atom_file)
-           msg = "created {0}".format(s3_url)
-           self.logger.info(msg)
-       else:
-           key = bucket.get_key(parts.path)
-           key.set_metadata("Content-Type", mimetype)
-           key.set_contents_from_filename(self.atom_file)
-           msg = "re-uploaded {}".format(s3_url)
-           self.logger.info(msg)
+       s3 = boto3.client('s3')
+       with open(self.atom_file, 'r') as f:
+           s3.upload_fileobj(f, bucketbase, keypath)
 
     def get_object_view_url(self, nuxeo_id):
         """ Get object view URL """
