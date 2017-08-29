@@ -416,6 +416,16 @@ class MerrittAtom():
         return docs 
 
 def main(argv=None):
+
+    numeric_level = getattr(logging, 'INFO', None)
+    logging.basicConfig(
+        level=numeric_level,
+        format='%(asctime)s (%(name)s) [%(levelname)s]: %(message)s',
+        datefmt='%m/%d/%Y %I:%M:%S %p',
+        stream=sys.stderr
+    )
+    logger = logging.getLogger(__name__)
+
     parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
     parser.add_argument("collection", help="UCLDC Registry Collection ID")
     parser.add_argument("--pynuxrc", help="rc file for use by pynux")
@@ -438,9 +448,10 @@ def main(argv=None):
 
     ma = MerrittAtom(collection_id, **kwargs)
 
-    print "atom_file: {}".format(ma.atom_file)
-    print "Nuxeo path: {}".format(ma.path)
-    print "Fetching Nuxeo docs. This could take a while if collection is large..."
+    logger.info("atom_file: {}".format(ma.atom_file))
+    logger.info("Nuxeo path: {}".format(ma.path))
+    logger.info("Fetching Nuxeo docs. This could take a while if collection is large...")
+
     parent_docs = ma.dh.fetch_objects()
     
     bundled_docs = ma._bundle_docs(parent_docs)
@@ -452,15 +463,15 @@ def main(argv=None):
     # add entries
     for document in bundled_docs: 
         nxid = document['uid']
-        print "working on document: {} {}".format(nxid, document['path'])
+        logger.info("working on document: {} {}".format(nxid, document['path']))
 
         # object, bundled into one <entry> if complex
         entry = ma._construct_entry_bundled(document)
-        print "inserting entry for object {} {}".format(nxid, document['path'])
+        logger.info("inserting entry for object {} {}".format(nxid, document['path']))
         root.insert(0, entry)
 
     # add header info
-    print "Adding header info to xml tree"
+    logging.info("Adding header info to xml tree")
     ma._add_merritt_id(root, ma.merritt_id)
     ma._add_paging_info(root)
     ma._add_collection_alt_link(root, ma.path)
@@ -468,11 +479,11 @@ def main(argv=None):
     ma._add_feed_updated(root, datetime.now(dateutil.tz.tzutc()).isoformat())
 
     ma._write_feed(root)
-    print "Feed written to file: {}".format(ma.atom_filepath)
+    logging.info("Feed written to file: {}".format(ma.atom_filepath)) 
 
     if not argv.nostash:
         ma._s3_stash()
-        print "Feed stashed on s3: {}".format(ma.s3_url)
+        logger.info("Feed stashed on s3: {}".format(ma.s3_url))
 
 if __name__ == "__main__":
     sys.exit(main())
