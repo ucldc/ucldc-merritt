@@ -8,7 +8,6 @@ from pynux import utils
 from datetime import datetime
 import dateutil.tz
 from dateutil.parser import parse
-import pprint
 import urlparse
 from deepharvest.deepharvest_nuxeo import DeepHarvestNuxeo
 from os.path import expanduser
@@ -20,7 +19,6 @@ import logging
 from operator import itemgetter
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
-pp = pprint.PrettyPrinter()
 ATOM_NS = "http://www.w3.org/2005/Atom"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 NX_NS = "http://www.nuxeo.org/ecm/project/schemas/tingle-california-digita/ucldc_schema"
