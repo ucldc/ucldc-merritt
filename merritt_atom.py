@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import sys, os
-import argparse
 from lxml import etree
 from pynux import utils
 from datetime import datetime
@@ -47,10 +46,16 @@ class MerrittAtom():
             pynuxrc = None
 
         if 'dir' in kwargs:
-            dir = kwargs['dir']
+            self.dir = kwargs['dir']
         else:
-            dir = '.'
+            self.dir = '.'
 
+        if 'nostash' in kwargs:
+            self.nostash = kwargs['nostash']
+        else:
+            self.nostash = False
+
+        self.logger.info("collection_id: {}".format(self.collection_id))
         self.path = self._get_nuxeo_path()
         self.merritt_id = self._get_merritt_id()
 
@@ -72,7 +77,7 @@ class MerrittAtom():
 
         self.s3_url = "{}{}".format(self.feed_base_url, self.atom_file)
 
-        self.atom_filepath = os.path.join(dir, self.atom_file)
+        self.atom_filepath = os.path.join(self.dir, self.atom_file)
 
         self.last_feed_tree = self._s3_get_feed()
 
@@ -331,7 +336,7 @@ class MerrittAtom():
        keypath = '/'.join(keyparts)
 
        s3 = boto3.client('s3')
-       with open(self.atom_file, 'r') as f:
+       with open(self.atom_filepath, 'r') as f:
            s3.upload_fileobj(f, bucketbase, keypath)
 
     def get_object_view_url(self, nuxeo_id):
@@ -379,16 +384,18 @@ class MerrittAtom():
         if metadata['properties']['files:files']:
             attachments = metadata['properties']['files:files']
             for attachment in attachments:
-                url = attachment['file']['data']
-                url = url.replace('/nuxeo/', '/Nuxeo/')
-                urls.append(url) 
+                if attachment['file'] and attachment['file']['data']:
+                    url = attachment['file']['data']
+                    url = url.replace('/nuxeo/', '/Nuxeo/')
+                    urls.append(url) 
 
         # get any "extra_file" files
         if metadata['properties']['extra_files:file']:
             for extra_file in metadata['properties']['extra_files:file']:
-                url = extra_file['blob']['data']
-                url = url.replace('/nuxeo/', '/Nuxeo/')
-                urls.append(url)
+                if extra_file['blob'] and extra_file['blob']['data']:
+                    url = extra_file['blob']['data']
+                    url = url.replace('/nuxeo/', '/Nuxeo/')
+                    urls.append(url)
 
         return urls 
 
@@ -415,75 +422,47 @@ class MerrittAtom():
 
         return docs 
 
+    def process_feed(self):
+        ''' create feed for collection and stash on s3 '''
+        self.logger.info("atom_file: {}".format(self.atom_file))
+        self.logger.info("Nuxeo path: {}".format(self.path))
+        self.logger.info("Fetching Nuxeo docs. This could take a while if collection is large...")
+
+        parent_docs = self.dh.fetch_objects()
+
+        bundled_docs = self._bundle_docs(parent_docs)
+        bundled_docs.sort(key=itemgetter('bundle_lastModified'))
+
+        # create root
+        root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
+
+        # add entries
+        for document in bundled_docs:
+            nxid = document['uid']
+            self.logger.info("working on document: {} {}".format(nxid, document['path']))
+
+            # object, bundled into one <entry> if complex
+            entry = self._construct_entry_bundled(document)
+            self.logger.info("inserting entry for object {} {}".format(nxid, document['path']))
+            root.insert(0, entry)
+
+        # add header info
+        logging.info("Adding header info to xml tree")
+        self._add_merritt_id(root, self.merritt_id)
+        self._add_paging_info(root)
+        self._add_collection_alt_link(root, self.path)
+        self._add_atom_elements(root)
+        self._add_feed_updated(root, datetime.now(dateutil.tz.tzutc()).isoformat())
+
+        self._write_feed(root)
+        logging.info("Feed written to file: {}".format(self.atom_filepath))
+
+        if not self.nostash:
+            self._s3_stash()
+            self.logger.info("Feed stashed on s3: {}".format(self.s3_url)) 
+
 def main(argv=None):
-
-    numeric_level = getattr(logging, 'INFO', None)
-    logging.basicConfig(
-        level=numeric_level,
-        format='%(asctime)s (%(name)s) [%(levelname)s]: %(message)s',
-        datefmt='%m/%d/%Y %I:%M:%S %p',
-        stream=sys.stderr
-    )
-    logger = logging.getLogger(__name__)
-
-    parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
-    parser.add_argument("collection", help="UCLDC Registry Collection ID")
-    parser.add_argument("--pynuxrc", help="rc file for use by pynux")
-    parser.add_argument("--bucket", help="S3 bucket where feed is stashed")
-    parser.add_argument("--dir", help="local directory where feed is written" )
-    parser.add_argument("--nostash", action='store_true', help="write feed to local directory and do not stash on S3")
-
-    if argv is None:
-        argv = parser.parse_args()
-
-    collection_id = argv.collection
-
-    kwargs = {}
-    if argv.pynuxrc:
-        kwargs['pynuxrc'] = argv.pynuxrc
-    if argv.bucket:
-        kwargs['bucket'] = argv.bucket
-    if argv.dir:
-        kwargs['dir'] = argv.dir
-
-    ma = MerrittAtom(collection_id, **kwargs)
-
-    logger.info("atom_file: {}".format(ma.atom_file))
-    logger.info("Nuxeo path: {}".format(ma.path))
-    logger.info("Fetching Nuxeo docs. This could take a while if collection is large...")
-
-    parent_docs = ma.dh.fetch_objects()
-    
-    bundled_docs = ma._bundle_docs(parent_docs)
-    bundled_docs.sort(key=itemgetter('bundle_lastModified'))
-
-    # create root
-    root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
-
-    # add entries
-    for document in bundled_docs: 
-        nxid = document['uid']
-        logger.info("working on document: {} {}".format(nxid, document['path']))
-
-        # object, bundled into one <entry> if complex
-        entry = ma._construct_entry_bundled(document)
-        logger.info("inserting entry for object {} {}".format(nxid, document['path']))
-        root.insert(0, entry)
-
-    # add header info
-    logging.info("Adding header info to xml tree")
-    ma._add_merritt_id(root, ma.merritt_id)
-    ma._add_paging_info(root)
-    ma._add_collection_alt_link(root, ma.path)
-    ma._add_atom_elements(root)
-    ma._add_feed_updated(root, datetime.now(dateutil.tz.tzutc()).isoformat())
-
-    ma._write_feed(root)
-    logging.info("Feed written to file: {}".format(ma.atom_filepath)) 
-
-    if not argv.nostash:
-        ma._s3_stash()
-        logger.info("Feed stashed on s3: {}".format(ma.s3_url))
+    pass
 
 if __name__ == "__main__":
     sys.exit(main())
