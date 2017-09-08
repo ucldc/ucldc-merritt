@@ -2,74 +2,70 @@
 # -*- coding: utf-8 -*-
 
 import sys, os
-import argparse
 from lxml import etree
 from pynux import utils
 from datetime import datetime
 import dateutil.tz
-import pprint
+from dateutil.parser import parse
 import urlparse
 from deepharvest.deepharvest_nuxeo import DeepHarvestNuxeo
 from os.path import expanduser
 import codecs
 import json
 import requests
-import boto
+import boto3
 import logging
+from operator import itemgetter
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
-pp = pprint.PrettyPrinter()
 ATOM_NS = "http://www.w3.org/2005/Atom"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 NX_NS = "http://www.nuxeo.org/ecm/project/schemas/tingle-california-digita/ucldc_schema"
 NS_MAP = {None: ATOM_NS,
           "nx": NX_NS,
           "dc": DC_NS}
-# we want to implement this mapping in the Registry:
-MERRITT_ID_MAP = {'asset-library/UCM/Ramicova': 'ark:/13030/m5b58sn8',
-                  'asset-library/UCM/Don Pedro Dam': 'ark:/13030/m5p60962',
-                  'asset-library/UCM/MercedLocalHistoryCollection': 'ark:/13030/m5wm1bf0',
-                  'asset-library/UCM/Assembly Newsletters': 'ark:/13030/m58h37qg',
-                  'asset-library/UCSF/School_of_Dentistry_130': 'ark:/13030/m5xp9hp7',
-                  'asset-library/UCSF/A_History_of_UCSF': 'ark:/13030/m5sx8rx2',
-                  'asset-library/UCSF/30th_General_Hospital': 'ark:/13030/m5p58150',
-                  'asset-library/UCSF/Day_Robert_L_Collection': 'ark:/13030/m5dn6hr0',
-                  'asset-library/UCSF/Photograph_collection': 'ark:/13030/m5jd78gq',
-                  'asset-library/UCSF/JapaneseWoodblocks': 'ark:/13030/m58w5s1p',
-                  'asset-library/UCB/UCB\ EDA': 'ark:/13030/m500292r',
-                  'asset-library/UCR': 'ark:/13030/m5qg11t8',
-                  'asset-library/UCSC': 'ark:/13030/m5kq0912',
-                  'asset-library/UCI/artists_books': 'ark:/13030/m56d5r8z'}
 REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
-BUCKET = 'static.ucldc.cdlib.org/merritt' # FIXME put this in a conf file
-FEED_BASE_URL = 'https://s3.amazonaws.com/{}/'.format(BUCKET)
-'''
-# following is mapping from Adrian. All are in Nuxeo except for UCSF Library Legacy Tobacco Documents Library
-ark:/13030/m5b58sn8    University of California, Merced Library Nuxeo collections
-ark:/13030/m52c19rr      UCSF Library Legacy Tobacco Documents Library
-ark:/13030/m5xp9hp7   UCSF Library School of Dentistry 130th Anniversary
-ark:/13030/m5sx8rx2     UCSF Library A History of UCSF
-ark:/13030/m5p58150    UCSF Library 30th General Hospital
-ark:/13030/m5dn6hr0    UCSF Library Robert L. Day Image Collection
-ark:/13030/m5jd78gq     UCSF Library Photograph Collection
-ark:/13030/m58w5s1p   UCSF Library Japanese Woodblock Print Collection
-ark:/13030/m500292r     UC Berkeley Environmental Design Archives Nuxeo collections
-ark:/13030/m5qg11t8     UC Riverside Nuxeo collections
-ark:/13030/m5kq0912    UC Santa Cruz Nuxeo collections
-'''
+BUCKET = 'static.ucldc.cdlib.org/merritt'
 
 class MerrittAtom():
 
-    def __init__(self, collection_id, pynuxrc=''):
+    def __init__(self, collection_id, **kwargs):
 
         self.logger = logging.getLogger(__name__)
 
         self.collection_id = collection_id
+
+        if 'bucket' in kwargs:
+            self.bucket = kwargs['bucket']
+        else:
+            self.bucket = BUCKET
+
+        if 'pynuxrc' in kwargs:
+            pynuxrc = kwargs['pynuxrc']
+        else:
+            pynuxrc = None
+
+        if 'dir' in kwargs:
+            self.dir = kwargs['dir']
+        else:
+            self.dir = '.'
+
+        if 'nostash' in kwargs:
+            self.nostash = kwargs['nostash']
+        else:
+            self.nostash = False
+
+        self.logger.info("collection_id: {}".format(self.collection_id))
         self.path = self._get_nuxeo_path()
-        self.merritt_id = self.get_merritt_id(self.path)
+        self.merritt_id = self._get_merritt_id()
+
+        if not self.merritt_id:
+            raise ValueError("No Merritt ID for this collection")
+
+        self.feed_base_url = 'https://s3.amazonaws.com/{}/'.format(self.bucket)
 
         if pynuxrc:
-            self.nx = utils.Nuxeo(rcfile=open(pynuxrc,'r'))
+            self.nx = utils.Nuxeo(rcfile=open(expanduser(pynuxrc),'r'))
             self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=pynuxrc)
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
             self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
@@ -79,19 +75,20 @@ class MerrittAtom():
         if not self.atom_file:
             raise ValueError("Could not create filename for ATOM feed based on collection id: {}".format(self.collection_id))
 
-        self.s3_url = "{}{}".format(FEED_BASE_URL, self.atom_file)
+        self.s3_url = "{}{}".format(self.feed_base_url, self.atom_file)
 
-    def get_merritt_id(self, path):
-        ''' given the Nuxeo path, get corresponding Merritt collection ID '''
-        merritt_id = None
-        path = path.lstrip('/')
-        fullpath = path
-        while len(path.split('/')) > 1:
-            if path in MERRITT_ID_MAP:
-                merritt_id = MERRITT_ID_MAP[path]
-            path = os.path.dirname(path)
-        if merritt_id is None:
-            raise KeyError("Could not find match for '{}' in MERRITT_ID_MAP".format(fullpath))
+        self.atom_filepath = os.path.join(self.dir, self.atom_file)
+
+        self.last_feed_tree = self._s3_get_feed()
+
+    def _get_merritt_id(self):
+        ''' given collection registry ID, get corresponding Merritt collection ID '''
+        url = "{}collection/{}/?format=json".format(REGISTRY_API_BASE, self.collection_id)
+        res = requests.get(url)
+        res.raise_for_status()
+        md = json.loads(res.text)
+        merritt_id = md['merritt_id']
+
         return merritt_id 
 
     def _get_nuxeo_path(self):
@@ -110,11 +107,26 @@ class MerrittAtom():
 
         return filename 
 
-    def _extract_nx_metadata(self, uid): 
+    def _get_last_feed_date(self):
+        ''' get the date/time that the feed was last generated
+            return `null` if there isn't one '''
+        # grab ATOM feed from S3
+        root = self.last_feed_tree
+
+        if root is None:
+            return None
+        else:
+            # parse out feed date
+            updated_str = root.find('{http://www.w3.org/2005/Atom}updated').text 
+            return parse(updated_str) 
+
+    def _extract_nx_metadata(self, raw_metadata): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
-        raw_metadata = self.nx.get_metadata(uid=uid)
         metadata = {}
         
+        # last modified 
+        metadata['lastModified'] = raw_metadata['bundle_lastModified']
+
         # creator
         creators = raw_metadata['properties']['ucldc_schema:creator']
         metadata['creator'] = [creator['name'] for creator in creators]
@@ -135,19 +147,12 @@ class MerrittAtom():
 
         return metadata
 
-    def _construct_entry(self, uid, is_parent):
-        ''' construct ATOM feed entry element for a given nuxeo doc '''
-        nx_metadata = self._extract_nx_metadata(uid)
-        entry = etree.Element(etree.QName(ATOM_NS, "entry"))
-        entry = self._populate_entry(entry, nx_metadata, uid, is_parent)
-
-        return entry
-
     def _construct_entry_bundled(self, doc):
         ''' construct ATOM feed entry element for a given nuxeo doc, including files for any component objects '''
-        # parent
         uid = doc['uid']
-        nx_metadata = self._extract_nx_metadata(uid)
+
+        # parent
+        nx_metadata = self._extract_nx_metadata(doc)
         entry = etree.Element(etree.QName(ATOM_NS, "entry"))
         entry = self._populate_entry(entry, nx_metadata, uid, True)
 
@@ -228,8 +233,7 @@ class MerrittAtom():
  
         # atom updated
         atom_updated = etree.SubElement(entry, etree.QName(ATOM_NS, "updated"))
-        atom_updated.text = datetime.now(dateutil.tz.tzutc()).isoformat()
-        self.last_update = atom_updated.text
+        atom_updated.text = metadata['lastModified'].isoformat()
 
         # atom author
         atom_author = etree.SubElement(entry, etree.QName(ATOM_NS, "author"))
@@ -284,7 +288,8 @@ class MerrittAtom():
     def _insert_main_content_link(self, entry, uid):
         nx_metadata = self.nx.get_metadata(uid=uid)
         nuxeo_file_download_url = self.get_object_download_url(nx_metadata)
-        main_content_link = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
+        if nuxeo_file_download_url:
+            main_content_link = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
 
 
     def _insert_aux_links(self, entry, uid):
@@ -304,38 +309,35 @@ class MerrittAtom():
         feed = etree.ElementTree(doc)
         feed_string = etree.tostring(feed, pretty_print=True, encoding='utf-8', xml_declaration=True)
 
-        with open(self.atom_file, "w") as f:
+        with open(self.atom_filepath, "w") as f:
             f.write(feed_string)
       
+    def _s3_get_feed(self):
+       """ Retrieve ATOM feed file from S3. Return as ElementTree object """
+       bucketpath = self.bucket.strip("/")
+       bucketbase = self.bucket.split("/")[0]
+       keyparts = bucketpath.split("/")[1:]
+       keyparts.append(self.atom_file)
+       keypath = '/'.join(keyparts)
+
+       s3 = boto3.client('s3')
+       response = s3.get_object(Bucket=bucketbase,Key=keypath)
+       contents = response['Body'].read()
+
+       return etree.fromstring(contents) 
+
     def _s3_stash(self):
-       """ Stash file in S3 bucket. 
+       """ Stash file in S3 bucket.
        """
-       s3_url = 's3://{}/{}'.format(BUCKET, self.atom_file)
-       bucketpath = BUCKET.strip("/")
-       bucketbase = BUCKET.split("/")[0]
-       parts = urlparse.urlsplit(s3_url)
-       mimetype = 'application/xml' 
-       
-       conn = boto.connect_s3()
+       bucketpath = self.bucket.strip("/")
+       bucketbase = self.bucket.split("/")[0]
+       keyparts = bucketpath.split("/")[1:]
+       keyparts.append(self.atom_file)
+       keypath = '/'.join(keyparts)
 
-       try:
-           bucket = conn.get_bucket(bucketbase)
-       except boto.exception.S3ResponseError:
-           bucket = conn.create_bucket(bucketbase)
-           self.logger.info("Created S3 bucket {}".format(bucketbase))
-
-       if not(bucket.get_key(parts.path)):
-           key = bucket.new_key(parts.path)
-           key.set_metadata("Content-Type", mimetype)
-           key.set_contents_from_filename(self.atom_file)
-           msg = "created {0}".format(s3_url)
-           self.logger.info(msg)
-       else:
-           key = bucket.get_key(parts.path)
-           key.set_metadata("Content-Type", mimetype)
-           key.set_contents_from_filename(self.atom_file)
-           msg = "re-uploaded {}".format(s3_url)
-           self.logger.info(msg)
+       s3 = boto3.client('s3')
+       with open(self.atom_filepath, 'r') as f:
+           s3.upload_fileobj(f, bucketbase, keypath)
 
     def get_object_view_url(self, nuxeo_id):
         """ Get object view URL """
@@ -382,78 +384,85 @@ class MerrittAtom():
         if metadata['properties']['files:files']:
             attachments = metadata['properties']['files:files']
             for attachment in attachments:
-                url = attachment['file']['data']
-                url = url.replace('/nuxeo/', '/Nuxeo/')
-                urls.append(url) 
+                if attachment['file'] and attachment['file']['data']:
+                    url = attachment['file']['data']
+                    url = url.replace('/nuxeo/', '/Nuxeo/')
+                    urls.append(url) 
 
         # get any "extra_file" files
         if metadata['properties']['extra_files:file']:
             for extra_file in metadata['properties']['extra_files:file']:
-                url = extra_file['blob']['data']
-                url = url.replace('/nuxeo/', '/Nuxeo/')
-                urls.append(url)
+                if extra_file['blob'] and extra_file['blob']['data']:
+                    url = extra_file['blob']['data']
+                    url = url.replace('/nuxeo/', '/Nuxeo/')
+                    urls.append(url)
 
         return urls 
 
+    def _bundle_docs(self, docs):
+        ''' given a dict of parent level nuxeo docs, fetch any components
+            and also figure out when any part of the object was most 
+            recently modified/added '''
+
+        for doc in docs:
+
+            last_mod_str = doc['lastModified']
+            overall_mod_datetime = parse(last_mod_str)
+
+            doc['components'] = []
+            
+            for c in doc['components']:
+                mod_str = c['lastModified']
+                mod_datetime = parse(mod_str)
+        
+                if mod_datetime > overall_mod_datetime:
+                    overall_mod_datetime = mod_datetime 
+
+            doc['bundle_lastModified'] = overall_mod_datetime
+
+        return docs 
+
+    def process_feed(self):
+        ''' create feed for collection and stash on s3 '''
+        self.logger.info("atom_file: {}".format(self.atom_file))
+        self.logger.info("Nuxeo path: {}".format(self.path))
+        self.logger.info("Fetching Nuxeo docs. This could take a while if collection is large...")
+
+        parent_docs = self.dh.fetch_objects()
+
+        bundled_docs = self._bundle_docs(parent_docs)
+        bundled_docs.sort(key=itemgetter('bundle_lastModified'))
+
+        # create root
+        root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
+
+        # add entries
+        for document in bundled_docs:
+            nxid = document['uid']
+            self.logger.info("working on document: {} {}".format(nxid, document['path']))
+
+            # object, bundled into one <entry> if complex
+            entry = self._construct_entry_bundled(document)
+            self.logger.info("inserting entry for object {} {}".format(nxid, document['path']))
+            root.insert(0, entry)
+
+        # add header info
+        logging.info("Adding header info to xml tree")
+        self._add_merritt_id(root, self.merritt_id)
+        self._add_paging_info(root)
+        self._add_collection_alt_link(root, self.path)
+        self._add_atom_elements(root)
+        self._add_feed_updated(root, datetime.now(dateutil.tz.tzutc()).isoformat())
+
+        self._write_feed(root)
+        logging.info("Feed written to file: {}".format(self.atom_filepath))
+
+        if not self.nostash:
+            self._s3_stash()
+            self.logger.info("Feed stashed on s3: {}".format(self.s3_url)) 
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
-    parser.add_argument("collection", help="UCLDC Registry Collection ID")
-    parser.add_argument("--pynuxrc", help="rc file for use by pynux")
-    if argv is None:
-        argv = parser.parse_args()
-    collection_id = argv.collection
-
-    if argv.pynuxrc:
-        ma = MerrittAtom(collection_id, argv.pynuxrc)
-    else:
-        ma = MerrittAtom(collection_id)
-
-    print "atom_file: {}".format(ma.atom_file)
-    print "ma.path: {}".format(ma.path)
-
-    print "Nuxeo path: {}".format(ma.path)
-    print "Fetching Nuxeo docs. This could take a while if collection is large..."
-    documents = ma.dh.fetch_objects()
-
-    # create root
-    root = etree.Element(etree.QName(ATOM_NS, "feed"), nsmap=NS_MAP)
-
-    # add entries
-    for document in documents:
-        nxid = document['uid']
-        print "working on document: {} {}".format(nxid, document['path'])
-
-        # object, bundled into one <entry> if complex
-        entry = ma._construct_entry_bundled(document)
-        print "inserting entry for object {} {}".format(nxid, document['path'])
-        root.insert(0, entry)
-
-        '''
-        # parent
-        entry = ma._construct_entry(nxid, True)
-        print "inserting entry for parent object {} {}".format(nxid, document['path'])
-        root.insert(0, entry)
-
-        # children
-        component_entries = [ma._construct_entry(c['uid'], False) for c in dh.fetch_components(document)]
-        for ce in component_entries:
-            print "inserting entry for component: {} {}".format(nxid, document['path'])
-            root.insert(0, ce)
-        '''
-
-    # add header info
-    print "Adding header info to xml tree"
-    ma._add_merritt_id(root, ma.merritt_id)
-    ma._add_paging_info(root)
-    ma._add_collection_alt_link(root, ma.path)
-    ma._add_atom_elements(root)
-    ma._add_feed_updated(root, ma.last_update)
-
-    ma._write_feed(root)
-    print "Feed written to file: {}".format(ma.atom_file)
-
-    ma._s3_stash()
-    print "Feed stashed on s3: {}".format(ma.s3_url)
+    pass
 
 if __name__ == "__main__":
     sys.exit(main())

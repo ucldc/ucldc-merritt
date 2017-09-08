@@ -22,7 +22,8 @@ setup(
         'lxml',
         'pynux',
         'python-dateutil',
-        'UCLDC-Deep-Harvester'
+        'UCLDC-Deep-Harvester',
+        'boto3'
     ],
     test_suite='tests'
 )
