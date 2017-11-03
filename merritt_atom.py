@@ -21,9 +21,11 @@ from operator import itemgetter
 ATOM_NS = "http://www.w3.org/2005/Atom"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 NX_NS = "http://www.nuxeo.org/ecm/project/schemas/tingle-california-digita/ucldc_schema"
+OPENSEARCH_NS = "http://a9.com/-/spec/opensearch/1.1/"
 NS_MAP = {None: ATOM_NS,
           "nx": NX_NS,
-          "dc": DC_NS}
+          "dc": DC_NS,
+          "opensearch": OPENSEARCH_NS}
 REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
 BUCKET = 'static.ucldc.cdlib.org/merritt'
 
@@ -288,16 +290,22 @@ class MerrittAtom():
     def _insert_main_content_link(self, entry, uid):
         nx_metadata = self.nx.get_metadata(uid=uid)
         nuxeo_file_download_url = self.get_object_download_url(nx_metadata)
+        checksum = self.get_nuxeo_file_checksum(nx_metadata)
         if nuxeo_file_download_url:
             main_content_link = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=nuxeo_file_download_url, title="Main content file") # FIXME add content_type
-
+        
+        if checksum:
+            checksum_element = etree.SubElement(main_content_link, etree.QName(OPENSEARCH_NS, "checksum"), algorithm="MD5")
+            checksum_element.text = checksum
 
     def _insert_aux_links(self, entry, uid):
         nx_metadata = self.nx.get_metadata(uid=uid)
-        aux_file_urls = self.get_aux_file_urls(nx_metadata)
-        for af in aux_file_urls:
-            link_aux_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=af, title="Auxiliary file")
-
+        aux_files = self.get_aux_files(nx_metadata)
+        for af in aux_files:
+            link_aux_file = etree.SubElement(entry, etree.QName(ATOM_NS, "link"), rel="alternate", href=af['url'], title="Auxiliary file")
+            if af['checksum']:
+                checksum_element = etree.SubElement(link_aux_file, etree.QName(OPENSEARCH_NS, "checksum"), algorithm="MD5")
+                checksum_element.text = af['checksum']
 
     def _insert_full_md_link(self, entry, uid):
         full_metadata_url = self.get_full_metadata(uid)
@@ -376,18 +384,36 @@ class MerrittAtom():
 
         return url
 
-    def get_aux_file_urls(self, metadata):
+    def get_nuxeo_file_checksum(self, metadata):
+        ''' get md5 checksum for nuxeo file '''
+        try:
+            file_content = metadata['properties']['file:content']
+        except KeyError:
+            raise KeyError("Nuxeo object metadata does not contain 'properties/file:content' element. Make sure 'X-NXDocumentProperties' provided in pynux conf includes 'file'")
+
+        if file_content is None:
+            return None
+        else:
+            checksum = file_content['digest']
+
+        return checksum
+
+    def get_aux_files(self, metadata):
         ''' get auxiliary file urls '''
-        urls = []
+        all_md = []
         
         # get any "attachment" files
         if metadata['properties']['files:files']:
             attachments = metadata['properties']['files:files']
             for attachment in attachments:
+                md = {}
                 if attachment['file'] and attachment['file']['data']:
                     url = attachment['file']['data']
                     url = url.replace('/nuxeo/', '/Nuxeo/')
-                    urls.append(url) 
+                    md['url'] = url
+                if attachment['file'] and attachment['file']['digest']:
+                    md['checksum'] = attachment['file']['digest']
+                all_md.append(md)
 
         # get any "extra_file" files
         if metadata['properties']['extra_files:file']:
@@ -395,9 +421,9 @@ class MerrittAtom():
                 if extra_file['blob'] and extra_file['blob']['data']:
                     url = extra_file['blob']['data']
                     url = url.replace('/nuxeo/', '/Nuxeo/')
-                    urls.append(url)
+                    all_md.append(url)
 
-        return urls 
+        return all_md 
 
     def _bundle_docs(self, docs):
         ''' given a dict of parent level nuxeo docs, fetch any components
