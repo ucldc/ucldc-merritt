@@ -18,7 +18,7 @@ def main():
     )
     logger = logging.getLogger(__name__)
 
-    parser = argparse.ArgumentParser(description='Create ATOM feed for a given Nuxeo folder for Merritt harvesting')
+    parser = argparse.ArgumentParser(description='refresh merritt atom feeds already stashed on S3')
     parser.add_argument("--pynuxrc", help="rc file for use by pynux")
     parser.add_argument("--bucket", help="S3 bucket where feed is stashed")
     parser.add_argument("--dir", help="local directory where feed is written" )
