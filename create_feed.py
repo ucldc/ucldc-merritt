@@ -36,7 +36,7 @@ def main():
     if argv.dir:
         kwargs['dir'] = argv.dir
     if argv.nostash:
-        kwargs['notstash'] = argv.nostash
+        kwargs['nostash'] = argv.nostash
 
     print "collection_id: {}".format(collection_id)
     print "kwargs: {}".format(kwargs)
