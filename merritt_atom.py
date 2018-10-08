@@ -413,15 +413,21 @@ class MerrittAtom():
                     md['url'] = url
                 if attachment['file'] and attachment['file']['digest']:
                     md['checksum'] = attachment['file']['digest']
-                all_md.append(md)
+                if md:
+                    all_md.append(md)
 
         # get any "extra_file" files
         if metadata['properties']['extra_files:file']:
             for extra_file in metadata['properties']['extra_files:file']:
+                md = {}
                 if extra_file['blob'] and extra_file['blob']['data']:
                     url = extra_file['blob']['data']
                     url = url.replace('/nuxeo/', '/Nuxeo/')
-                    all_md.append(url)
+                    md['url'] = url
+                if extra_file['blob'] and extra_file['blob']['digest']:    
+                    md['checksum'] = extra_file['blob']['digest']
+                if md:
+                    all_md.append(md)
 
         return all_md 
 
