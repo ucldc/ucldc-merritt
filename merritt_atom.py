@@ -58,8 +58,16 @@ class MerrittAtom():
             self.nostash = False
 
         self.logger.info("collection_id: {}".format(self.collection_id))
-        self.path = self._get_nuxeo_path()
-        self.merritt_id = self._get_merritt_id()
+
+        if 'nuxeo_path' in kwargs:
+            self.path = kwargs['nuxeo_path']
+        else:
+            self.path = self._get_nuxeo_path()
+
+        if 'merritt_id' in kwargs:
+            self.merritt_id = kwargs['merritt_id']
+        else:
+            self.merritt_id = self._get_merritt_id()
 
         if not self.merritt_id:
             raise ValueError("No Merritt ID for this collection")
