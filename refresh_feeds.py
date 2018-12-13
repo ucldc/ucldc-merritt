@@ -37,13 +37,17 @@ def main():
         kwargs['bucket'] = argv.bucket
     if argv.dir:
         kwargs['dir'] = argv.dir
+    if argv.nostash:
+        kwargs['nostash'] = argv.nostash
 
     feeds = get_feed_info()
 
     # create and stash new feed for each collection
     for key, value in feeds.items():
-        ma = MerrittAtom(key, merritt_id=value['merritt_id'], nuxeo_path=value['nuxeo_endpoint'], **kwargs)
-        ma.process_feed()
+        print(value['nuxeo_endpoint'])
+        if value['nuxeo_endpoint'] == 'asset-library/UCM/Ramicova':
+            ma = MerrittAtom(key, merritt_id=value['merritt_id'], nuxeo_path=value['nuxeo_endpoint'], **kwargs)
+            ma.process_feed()
 
 def get_feed_info():
     ''' get list of collections for which to create feeds, based on registry info '''
