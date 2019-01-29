@@ -1,12 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import sys
+import argparse
 from lxml import etree
 import collections
 import pprint
 pp = pprint.PrettyPrinter(indent=4)
 
-filepath = ('./feeds_current/ucldc_collection_26098.atom')
+parser = argparse.ArgumentParser(description='check for duplicates in feed')
+parser.add_argument("path", help="filepath for feed")
+argv = parser.parse_args()
+
+filepath = argv.path
+
+print "filepath: ", filepath
 tree = etree.parse(filepath)
 root = tree.getroot()
 feed = root.iterfind('{http://www.w3.org/2005/Atom}feed/')
