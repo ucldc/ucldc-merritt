@@ -89,8 +89,6 @@ class MerrittAtom():
 
         self.atom_filepath = os.path.join(self.dir, self.atom_file)
 
-        self.last_feed_tree = self._s3_get_feed()
-
     def _get_merritt_id(self):
         ''' given collection registry ID, get corresponding Merritt collection ID '''
         url = "{}collection/{}/?format=json".format(REGISTRY_API_BASE, self.collection_id)
@@ -116,19 +114,6 @@ class MerrittAtom():
         filename = 'ucldc_collection_{}.atom'.format(collection_id)
 
         return filename 
-
-    def _get_last_feed_date(self):
-        ''' get the date/time that the feed was last generated
-            return `null` if there isn't one '''
-        # grab ATOM feed from S3
-        root = self.last_feed_tree
-
-        if root is None:
-            return None
-        else:
-            # parse out feed date
-            updated_str = root.find('{http://www.w3.org/2005/Atom}updated').text 
-            return parse(updated_str) 
 
     def _extract_nx_metadata(self, raw_metadata): 
         ''' extract Nuxeo metadata we want to post to the ATOM feed '''
