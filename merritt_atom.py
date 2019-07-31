@@ -16,6 +16,7 @@ import requests
 import boto3
 import logging
 from operator import itemgetter
+import collections
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -447,6 +448,26 @@ class MerrittAtom():
 
         return docs 
 
+    def has_duplicates(self, root):
+        ''' check to see if there are duplicate entries in the feed '''
+        feed = root.iterfind('{http://www.w3.org/2005/Atom}feed/')
+        ids = root.iter("{http://purl.org/dc/elements/1.1/}identifier")
+
+        count = 0
+        idlist = []
+        for identifier in ids:
+            count = count + 1
+            #print(identifier.text), count
+            idlist.append(identifier.text)
+
+        dups = [item for item, count in collections.Counter(idlist).items() if count > 1]
+
+        if len(dups) > 0:
+            return True
+        else:
+            return False
+
+
     def process_feed(self):
         ''' create feed for collection and stash on s3 '''
         self.logger.info("atom_file: {}".format(self.atom_file))
@@ -482,9 +503,15 @@ class MerrittAtom():
         self._write_feed(root)
         logging.info("Feed written to file: {}".format(self.atom_filepath))
 
+        if self.has_duplicates(root):
+            self.logger.warning("Duplicates in feed {}. Will not stash on S3.".format(self.atom_filepath))
+            return 'DUPS'
+
         if not self.nostash:
             self._s3_stash()
             self.logger.info("Feed stashed on s3: {}".format(self.s3_url)) 
+
+        return 'OK'
 
 def main(argv=None):
     pass

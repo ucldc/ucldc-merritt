@@ -84,6 +84,7 @@ def refresh_existing(kwargs):
 
     bucket = s3.Bucket(bucketbase)
 
+    statuses = {}
     for obj in bucket.objects.filter(Prefix=prefix):
         if obj.key.endswith('.atom'):
             # get collection ID for each existing ATOM file
@@ -94,7 +95,10 @@ def refresh_existing(kwargs):
 
             # create and stash new feed for each
             ma = MerrittAtom(collection_id, **kwargs)
-            ma.process_feed()
+            status['collection_id']  = ma.process_feed()
+
+    for k, v in statuses.items():
+        logger.info('Feed status for collection {}: {}'.format(k, v))
 
 if __name__ == "__main__":
     sys.exit(main())

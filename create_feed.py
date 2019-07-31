@@ -38,11 +38,12 @@ def main():
     if argv.nostash:
         kwargs['nostash'] = argv.nostash
 
-    print "collection_id: {}".format(collection_id)
-    print "kwargs: {}".format(kwargs)
+    logger.info("collection_id: {}".format(collection_id))
+    logger.info("kwargs: {}".format(kwargs))
 
     ma = MerrittAtom(collection_id, **kwargs)
-    ma.process_feed()
+    status = ma.process_feed()
+    logger.info("feed status: {}".format(status))
 
 if __name__ == "__main__":
     sys.exit(main())
