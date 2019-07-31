@@ -23,7 +23,7 @@ setup(
         'pynux',
         'python-dateutil',
         'UCLDC-Deep-Harvester',
-        'boto3'
+        'boto3==1.9.160'
     ],
     test_suite='tests'
 )
