@@ -17,6 +17,7 @@ import boto3
 import logging
 from operator import itemgetter
 import collections
+from s3stash.nxstash_mediajson import NuxeoStashMediaJson
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -29,6 +30,8 @@ NS_MAP = {None: ATOM_NS,
           "opensearch": OPENSEARCH_NS}
 REGISTRY_API_BASE = 'https://registry.cdlib.org/api/v1/'
 BUCKET = 'static.ucldc.cdlib.org/merritt'
+MEDIA_JSON_BUCKET = 'static.ucldc.cdlib.org/merritt_media_json'
+MEDIA_JSON_REGION = 'us-east-1'
 
 class MerrittAtom():
 
@@ -373,8 +376,7 @@ class MerrittAtom():
 
     def get_media_json_url(self, nuxeo_id):
         """ Get media.json (deep harvest) url """
-        # https://s3.amazonaws.com/static.ucldc.cdlib.org/media_json/002130a5-e171-461b-a41b-28ab46af9652-media.json
-        url = "https://s3.amazonaws.com/static.ucldc.cdlib.org/media_json/{}-media.json".format(nuxeo_id)
+        url = "https://s3.amazonaws.com/{}/{}-media.json".format(MEDIA_JSON_BUCKET, nuxeo_id)
 
         return url
 
@@ -486,6 +488,14 @@ class MerrittAtom():
         for document in bundled_docs:
             nxid = document['uid']
             self.logger.info("working on document: {} {}".format(nxid, document['path']))
+
+            # create and stash media.json
+            if not self.nostash:
+               nxstash = NuxeoStashMediaJson(
+                  document['path'],
+	          MEDIA_JSON_BUCKET,
+                  MEDIA_JSON_REGION)
+               nxstash.nxstashref()
 
             # object, bundled into one <entry> if complex
             entry = self._construct_entry_bundled(document)
