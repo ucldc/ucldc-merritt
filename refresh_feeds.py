@@ -95,7 +95,7 @@ def refresh_existing(kwargs):
 
             # create and stash new feed for each
             ma = MerrittAtom(collection_id, **kwargs)
-            status['collection_id']  = ma.process_feed()
+            statuses['collection_id']  = ma.process_feed()
 
     for k, v in statuses.items():
         logger.info('Feed status for collection {}: {}'.format(k, v))
