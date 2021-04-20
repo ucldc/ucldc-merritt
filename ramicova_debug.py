@@ -8,7 +8,7 @@ import pprint
 pp = pprint.PrettyPrinter(indent=4)
 
 CHILD_NXQL = "SELECT * FROM Document WHERE ecm:parentId = '{}' AND " \
-             "ecm:currentLifeCycleState != 'deleted' ORDER BY ecm:pos"
+             "ecm:isTrashed = 0 ORDER BY ecm:pos"
 
 nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'), 'r'))
 
