@@ -7,8 +7,7 @@ from pynux import utils
 from datetime import datetime
 import dateutil.tz
 from dateutil.parser import parse
-import urlparse
-from deepharvest.deepharvest_nuxeo import DeepHarvestNuxeo
+import urllib.parse
 from os.path import expanduser
 import codecs
 import json
@@ -17,7 +16,6 @@ import boto3
 import logging
 from operator import itemgetter
 import collections
-from s3stash.nxstash_mediajson import NuxeoStashMediaJson
 
 """ Given the Nuxeo document path for a collection folder, publish ATOM feed for objects for Merritt harvesting. """
 ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -80,16 +78,16 @@ class MerrittAtom():
 
         if pynuxrc:
             self.nx = utils.Nuxeo(rcfile=open(expanduser(pynuxrc),'r'))
-            self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=pynuxrc)
+            #self.dh = DeepHarvestNuxeo(self.path, '', pynuxrc=pynuxrc)
         elif not(pynuxrc) and os.path.isfile(expanduser('~/.pynuxrc')):
             self.nx = utils.Nuxeo(rcfile=open(expanduser('~/.pynuxrc'),'r'))
-            self.dh = DeepHarvestNuxeo(self.path, '')
+            #self.dh = DeepHarvestNuxeo(self.path, '')
 
         self.atom_file = self._get_filename(self.collection_id)
         if not self.atom_file:
             raise ValueError("Could not create filename for ATOM feed based on collection id: {}".format(self.collection_id))
 
-        self.s3_url = "{}{}".format(self.feed_base_url, self.atom_file)
+        self.s3_url = "{}{}".format(self.feed_base_url, self.atom_file) 
 
         self.atom_filepath = os.path.join(self.dir, self.atom_file)
 
@@ -146,22 +144,100 @@ class MerrittAtom():
 
         return metadata
 
-    def _construct_entry_bundled(self, doc):
+    def _construct_entry_bundled(self, parent, children):
         ''' construct ATOM feed entry element for a given nuxeo doc, including files for any component objects '''
-        uid = doc['uid']
+        uid = parent['uid']
 
         # parent
-        nx_metadata = self._extract_nx_metadata(doc)
+        nx_metadata = self._extract_nx_metadata(parent)
         entry = etree.Element(etree.QName(ATOM_NS, "entry"))
         entry = self._populate_entry(entry, nx_metadata, uid, True)
 
         # insert component md
-        for c in self.dh.fetch_components(doc):
+        for c in children:
             self._insert_full_md_link(entry, c['uid'])
             self._insert_main_content_link(entry, c['uid'])
             self._insert_aux_links(entry, c['uid'])
 
         return entry
+
+    def fetch_components(self, start_obj, depth=-1):
+        ''' fetch any component objects '''
+        components = []
+
+        def recurse(current, depth):
+            metadata = self.nx.get_metadata(uid=current['uid'])
+            if current != start_obj and self.has_file(metadata):
+                components.append(current)
+            if depth != 0:
+                query = f"SELECT * FROM Document WHERE ecm:parentId = '{current['uid']}' AND " \
+                    "ecm:isTrashed = 0 ORDER BY ecm:pos"
+                for child in self.nx.nxql(query):
+                    recurse(child, depth - 1)
+
+        recurse(start_obj, depth)
+
+        return components
+
+    def has_file(self, metadata):
+        ''' given the full metadata for an object, determine whether
+        or not nuxeo document has file content '''
+        try:
+            file_content = metadata['properties']['file:content']
+        except KeyError:
+            raise KeyError(
+                "Nuxeo object metadata does not contain 'properties/file:"
+                "content' element. Make sure 'X-NXDocumentProperties' "
+                "provided in pynux conf includes 'file'"
+            )
+
+        if file_content is None:
+            return False
+        elif file_content['name'] == 'empty_picture.png':
+            return False
+        else:
+            return True
+
+    def fetch_objects(self, uid):
+        ''' fetch Nuxeo objects at a given path '''
+        objects = []
+        query = f"SELECT * FROM Document WHERE ecm:parentId = '{uid}' AND " \
+              "ecm:isTrashed = 0 ORDER BY ecm:name"
+        for child in self.nx.nxql(query):
+            objects.extend(self.fetch_harvestable(child))
+
+        # make sure UIDs are unique
+        unique_uids = []
+        unique_objects = []
+        for obj in objects:
+            if not obj['uid'] in unique_uids:
+                unique_uids.append(obj['uid'])
+                unique_objects.append(obj)
+        
+        return unique_objects
+
+    def fetch_harvestable(self, start_obj, depth=-1):
+        '''
+            if the given Nuxeo object is harvestable, return it.
+            if it's an organizational folder, search recursively inside it
+            for all harvestable objects
+            (not components -- just top-level objects)
+        '''
+        harvestable = []
+
+        def recurse(current, depth):
+            if current['type'] != 'Organization':
+                harvestable.append(current)
+            if depth != 0:
+                if current['type'] == 'Organization':
+                    query = f"SELECT * FROM Document WHERE ecm:parentId = '{current['uid']}' AND " \
+                        "ecm:isTrashed = 0 ORDER BY ecm:pos"
+                    for child in self.nx.nxql(query):
+                        recurse(child, depth - 1)
+
+        recurse(start_obj, depth)
+
+        return harvestable
 
     def _add_atom_elements(self, doc):
         ''' add atom feed elements to document '''
@@ -314,11 +390,12 @@ class MerrittAtom():
         feed = etree.ElementTree(doc)
         feed_string = etree.tostring(feed, pretty_print=True, encoding='utf-8', xml_declaration=True)
 
-        with open(self.atom_filepath, "w") as f:
+        with open(self.atom_filepath, "wb") as f:
             f.write(feed_string)
       
     def _s3_get_feed(self):
        """ Retrieve ATOM feed file from S3. Return as ElementTree object """
+       # this isn't used
        bucketpath = self.bucket.strip("/")
        bucketbase = self.bucket.split("/")[0]
        keyparts = bucketpath.split("/")[1:]
@@ -346,13 +423,13 @@ class MerrittAtom():
 
     def get_object_view_url(self, nuxeo_id):
         """ Get object view URL """
-        parts = urlparse.urlsplit(self.nx.conf["api"])
+        parts = urllib.parse.urlsplit(self.nx.conf["api"])
         url = "{}://{}/Nuxeo/nxdoc/default/{}/view_documents".format(parts.scheme, parts.netloc, nuxeo_id) 
         return url
 
     def get_full_metadata(self, nuxeo_id):
         """ Get full metadata via Nuxeo API """
-        parts = urlparse.urlsplit(self.nx.conf["api"])
+        parts = urllib.parse.urlsplit(self.nx.conf["api"])
         url = '{}://{}/Merritt/{}.xml'.format(parts.scheme, parts.netloc, nuxeo_id)
     
         return url
@@ -462,13 +539,112 @@ class MerrittAtom():
             #print(identifier.text), count
             idlist.append(identifier.text)
 
-        dups = [item for item, count in collections.Counter(idlist).items() if count > 1]
+        dups = [item for item, count in list(collections.Counter(idlist).items()) if count > 1]
 
         if len(dups) > 0:
             return True
         else:
             return False
 
+    def create_media_json(self, object, components=[]):
+        '''
+        Given an object and its components, create a json representation 
+        compliant with these specs: https://github.com/ucldc/ucldc-docs/wiki/media.json
+
+        object is a dict of properties
+        components is a list of dicts of properties
+        '''
+        media_json = self.get_media_json_content(object)
+        if components:
+            media_json["structMap"] = [self.get_media_json_content(c) for c in components]
+
+        return media_json
+
+    def get_media_json_content(self, object):
+        content = {}
+        content["label"] = object["title"]
+        content["id"] = object["uid"]
+        if self.has_file(object):
+            content["id"] = object["uid"]
+            content["href"] = self.get_object_download_url(object)
+            content["format"] = self.get_calisphere_object_type(object['type'])
+            if content["format"] == "video":
+                content["dimensions"] = self.get_video_dimensions(object)
+
+        return content
+
+    def get_object_download_url(self, metadata):
+        ''' given the full metadata for an object, get file download url '''
+        try:
+            file_content = metadata['properties']['file:content']
+        except KeyError:
+            raise KeyError(
+                "Nuxeo object metadata does not contain 'properties/file:"
+                "content' element. Make sure 'X-NXDocumentProperties' "
+                "provided in pynux conf includes 'file'"
+            )
+
+        if file_content is None:
+            return None
+        elif file_content['name'] == 'empty_picture.png':
+            return None
+        else:
+            url = file_content['data']
+            return url       
+
+    def get_calisphere_object_type(self, nuxeo_type):
+        type_map = {
+            "SampleCustomPicture": "image",
+            "CustomAudio": "audio",
+            "CustomVideo": "video",
+            "CustomFile": "file",
+            "Organization": "file",
+            "CustomThreeD": "3d"
+        }
+        try:
+            calisphere_type = type_map[nuxeo_type]
+        except KeyError:
+            raise ValueError("Invalid type: {0} for: {1} Expected one of: {2}".
+                             format(nuxeo_type, self.path, type_map.keys()))
+        return calisphere_type
+
+    def get_video_dimensions(self, metadata):
+        ''' given the full metadata for an object, get dimensions in format
+        `width:height` '''
+        try:
+            vid_info = metadata['properties']['vid:info']
+        except KeyError:
+            raise KeyError(
+                "Nuxeo object metadata does not contain 'properties/vid:info'"
+                " element. Make sure 'X-NXDocumentProperties' provided in "
+                "pynux conf includes 'video'"
+            )
+
+        try:
+            width = vid_info['width']
+        except KeyError:
+            raise KeyError(
+                "Nuxeo object metadata does not contain 'properties/vid:"
+                "info/width' element."
+            )
+
+        try:
+            height = vid_info['height']
+        except KeyError:
+            raise KeyError(
+                "Nuxeo object metadata does not contain 'properties/video:"
+                "info/height' element."
+            )
+
+        return "{}:{}".format(width, height)
+
+    def _write_media_json_file(self, content_dict, filepath):
+        """ convert dict to json and write to file """
+        content_json = json.dumps(
+            content_dict, indent=4, separators=(',', ': '), sort_keys=False)
+        with open(filepath, 'w') as f:
+            f.write(content_json)
+            f.flush()
 
     def process_feed(self):
         ''' create feed for collection and stash on s3 '''
@@ -476,7 +652,8 @@ class MerrittAtom():
         self.logger.info("Nuxeo path: {}".format(self.path))
         self.logger.info("Fetching Nuxeo docs. This could take a while if collection is large...")
 
-        parent_docs = self.dh.fetch_objects()
+        collection_uid = self.nx.get_uid(self.path)
+        parent_docs = self.fetch_objects(collection_uid)
 
         bundled_docs = self._bundle_docs(parent_docs)
         bundled_docs.sort(key=itemgetter('bundle_lastModified'))
@@ -490,17 +667,26 @@ class MerrittAtom():
             self.logger.info("working on document: {} {}".format(nxid, document['path']))
 
             # create and stash media.json
-            if not self.nostash:
-               nxstash = NuxeoStashMediaJson(
-                  document['path'],
-	          MEDIA_JSON_BUCKET,
-                  MEDIA_JSON_REGION)
-               nxstash.nxstashref()
+            #if not self.nostash:
+            #   nxstash = NuxeoStashMediaJson(
+            #      document['path'],
+	        #  MEDIA_JSON_BUCKET,
+            #      MEDIA_JSON_REGION)
+            #   nxstash.nxstashref()
 
             # object, bundled into one <entry> if complex
-            entry = self._construct_entry_bundled(document)
+            children = self.fetch_components(document)
+            entry = self._construct_entry_bundled(document, children)
             self.logger.info("inserting entry for object {} {}".format(nxid, document['path']))
             root.insert(0, entry)
+
+            media_json = self.create_media_json(document, children)
+            filepath = os.path.join(self.dir, "media_json", f"{nxid}-media.json")
+            self._write_media_json_file(media_json, filepath)
+            if not self.nostash:
+                # TODO: write to S3 MEDIA_JSON_BUCKET
+                pass
+
 
         # add header info
         logging.info("Adding header info to xml tree")
@@ -523,8 +709,5 @@ class MerrittAtom():
 
         return 'OK'
 
-def main(argv=None):
-    pass
 
-if __name__ == "__main__":
-    sys.exit(main())
+

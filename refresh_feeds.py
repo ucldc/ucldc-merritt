@@ -43,7 +43,7 @@ def main():
     feeds = get_feed_info()
 
     # create and stash new feed for each collection
-    for key, value in feeds.items():
+    for key, value in list(feeds.items()):
         ma = MerrittAtom(key, merritt_id=value['merritt_id'], nuxeo_path=value['nuxeo_endpoint'], **kwargs)
         ma.process_feed()
 
@@ -72,33 +72,6 @@ def get_feed_info():
         url = "{}{}".format(REGISTRY_BASE, next)
  
     return feed_md
-
-def refresh_existing(kwargs):
-    ''' refresh feeds already on s3 '''
-
-    # get a list of current feeds on S3
-    bucketbase = 'static.ucldc.cdlib.org'
-    prefix = 'merritt/'
- 
-    s3 = boto3.resource('s3')
-
-    bucket = s3.Bucket(bucketbase)
-
-    statuses = {}
-    for obj in bucket.objects.filter(Prefix=prefix):
-        if obj.key.endswith('.atom'):
-            # get collection ID for each existing ATOM file
-            filename = obj.key.split(prefix)[1]
-            basename = filename.split('.')[0]
-            collection_id = basename.split('_')[-1]
-            logger.info("collection_id: {}".format(collection_id))
-
-            # create and stash new feed for each
-            ma = MerrittAtom(collection_id, **kwargs)
-            statuses['collection_id']  = ma.process_feed()
-
-    for k, v in statuses.items():
-        logger.info('Feed status for collection {}: {}'.format(k, v))
 
 if __name__ == "__main__":
     sys.exit(main())

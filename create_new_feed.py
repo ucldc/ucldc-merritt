@@ -44,7 +44,7 @@ def main():
     feeds = get_feed_info()
 
     # create and stash new feed for each collection
-    for key, value in feeds.items():
+    for key, value in list(feeds.items()):
         if key == argv.collectionid:
             ma = MerrittAtom(key, merritt_id=value['merritt_id'], nuxeo_path=value['nuxeo_endpoint'], **kwargs)
             ma.process_feed()

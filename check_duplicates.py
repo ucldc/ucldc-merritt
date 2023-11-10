@@ -14,7 +14,7 @@ argv = parser.parse_args()
 
 filepath = argv.path
 
-print "filepath: ", filepath
+print("filepath: ", filepath)
 tree = etree.parse(filepath)
 root = tree.getroot()
 feed = root.iterfind('{http://www.w3.org/2005/Atom}feed/')
@@ -28,7 +28,7 @@ for identifier in ids:
    #print(identifier.text), count
    idlist.append(identifier.text)
 
-dups = [item for item, count in collections.Counter(idlist).items() if count > 1]
+dups = [item for item, count in list(collections.Counter(idlist).items()) if count > 1]
 pp.pprint(dups)
-print len(idlist)
-print len(dups)
+print(len(idlist))
+print(len(dups))

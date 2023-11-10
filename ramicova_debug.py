@@ -19,7 +19,7 @@ for child in nx.nxql(query):
 
 #pp.pprint(uids)
 count = len(uids)
-dups = [item for item, count in collections.Counter(uids).items() if count > 1]
+dups = [item for item, count in list(collections.Counter(uids).items()) if count > 1]
 #pp.pprint(dups)
-print len(uids)
-print len(dups)
+print(len(uids))
+print(len(dups))
